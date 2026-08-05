@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{% if title %}{{ title }} · {% endif %}Gate</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Sora:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="atmosphere" aria-hidden="true"></div>
+  <div class="shell">
+    {% if user %}
+    <header class="top">
+      <a class="brand" href="/services">
+        <span class="brand-mark">Gate</span>
+        <span class="brand-sub">Proxmox TLS</span>
+      </a>
+      <nav class="nav">
+        <a href="/services" class="{% if title and 'ervice' in title %}active{% endif %}">Services</a>
+        <a href="/settings" class="{% if title == 'Settings' %}active{% endif %}">Settings</a>
+      </nav>
+      <form class="logout" method="post" action="/logout">
+        <span class="who">{{ user }}</span>
+        <button type="submit" class="btn ghost">Sign out</button>
+      </form>
+    </header>
+    {% endif %}
+
+    <main class="main">
+      {% if flash %}
+      <div class="flash {{ flash.kind }}" role="status">{{ flash.message }}</div>
+      {% endif %}
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</body>
+</html>

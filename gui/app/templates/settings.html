@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <h1>Settings</h1>
+    <p class="lede">Domain and ACME identity for self-maintained certificates. Changing the domain rewrites existing service hostnames.</p>
+  </div>
+</section>
+
+<form method="post" action="/settings" class="form-grid">
+  <label>
+    <span>Base domain</span>
+    <input name="domain" value="{{ settings.domain }}" required />
+    <small>Services publish as <code>&lt;name&gt;.{{ settings.domain }}</code>. Prefer a wildcard DNS record pointing at Traefik.</small>
+  </label>
+
+  <label>
+    <span>ACME email</span>
+    <input name="acme_email" type="email" value="{{ settings.acme_email }}" required />
+    <small>Let’s Encrypt account contact. Certs still renew automatically.</small>
+  </label>
+
+  <label class="check">
+    <input type="checkbox" name="acme_staging" {% if settings.acme_staging %}checked{% endif %} />
+    <span>Use Let’s Encrypt staging CA</span>
+    <small>Keep on until the gate works end-to-end, then turn off for trusted browsers.</small>
+  </label>
+
+  <div class="form-actions">
+    <button class="btn primary" type="submit">Save settings</button>
+  </div>
+</form>
+
+<section class="note">
+  <h2>Certificate maintenance</h2>
+  <p>Traefik stores ACME state in <code>acme.json</code> and renews before expiry. Adding a service in the GUI is enough — no manual certificate upload.</p>
+</section>
+{% endblock %}

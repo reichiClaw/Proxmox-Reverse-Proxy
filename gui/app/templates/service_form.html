@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <h1>{% if mode == 'create' %}Add service{% else %}Edit {{ service.name }}{% endif %}</h1>
+    <p class="lede">
+      {% if mode == 'create' %}
+      Creates <code>&lt;name&gt;.{{ settings.domain }}</code> with an automatic TLS certificate.
+      {% else %}
+      Updates the Traefik drop-in for this subdomain.
+      {% endif %}
+    </p>
+  </div>
+</section>
+
+<form method="post" class="form-grid">
+  <label>
+    <span>Name (subdomain label)</span>
+    {% if mode == 'create' %}
+    <input name="name" placeholder="gitea" pattern="[a-z0-9]([-a-z0-9]*[a-z0-9])?" required autofocus />
+    {% else %}
+    <input name="new_name" value="{{ service.name }}" pattern="[a-z0-9]([-a-z0-9]*[a-z0-9])?" {% if service.source == 'system' %}readonly{% endif %} required autofocus />
+    {% endif %}
+    <small>Public host: <code id="host-preview">{% if service %}{{ service.host }}{% else %}name.{{ settings.domain }}{% endif %}</code></small>
+  </label>
+
+  <label>
+    <span>Upstream URL</span>
+    <input name="upstream" type="url" placeholder="http://10.10.10.20:3000" value="{{ service.upstream if service else '' }}" required />
+    <small>Reachable from the Traefik LXC on the services network.</small>
+  </label>
+
+  <div class="form-actions">
+    <button class="btn primary" type="submit">{% if mode == 'create' %}Create route{% else %}Save changes{% endif %}</button>
+    <a class="btn ghost" href="/services">Cancel</a>
+  </div>
+</form>
+
+<script>
+  const domain = {{ settings.domain|tojson }};
+  const input = document.querySelector('input[name="name"], input[name="new_name"]');
+  const preview = document.getElementById('host-preview');
+  if (input && preview) {
+    const sync = () => {
+      const v = (input.value || 'name').toLowerCase();
+      preview.textContent = v + '.' + domain;
+    };
+    input.addEventListener('input', sync);
+    sync();
+  }
+</script>
+{% endblock %}

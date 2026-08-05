@@ -1,0 +1,21 @@
+[Unit]
+Description=Proxmox Gate admin GUI
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/gate
+Environment=GATE_REPO_ROOT=/opt/gate
+Environment=GATE_HOST=127.0.0.1
+Environment=GATE_PORT=8080
+Environment=GATE_HTTPS_ONLY=1
+EnvironmentFile=-/opt/gate/config/gui.env
+# Set GATE_SESSION_SECRET in /etc/gate-admin.env
+EnvironmentFile=-/etc/gate-admin.env
+ExecStart=/opt/gate/.venv/bin/python -m gui
+Restart=on-failure
+User=gate
+Group=gate
+
+[Install]
+WantedBy=multi-user.target
