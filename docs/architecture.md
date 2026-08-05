@@ -60,22 +60,23 @@ Rules:
 
 ## Easy service onboarding
 
-### Happy path (recommended)
+### Happy path (recommended) — Admin GUI
+
+Run the Gate web UI (`python -m gui`, published as `https://gate.<domain>`):
+
+1. **Services → Add service** — enter subdomain label + upstream URL.
+2. GUI writes `config/dynamic/apps/<name>.yml`.
+3. Traefik hot-reloads; ACME issues/renews the cert.
+4. Live at `https://<name>.<domain>`.
+
+**Settings** in the same UI covers base domain, ACME email, and staging/production CA.
+
+### CLI alternative
 
 ```bash
-# from this repo — creates config/dynamic/apps/gitea.yml
 ./scripts/add-service.sh gitea http://10.10.10.20:3000
-
-# sync into the Traefik LXC (or let your deploy path pick it up)
 ./deploy/sync-config.sh
 ```
-
-What happens next, without further cert work:
-
-1. Traefik file provider picks up the new YAML (hot reload).
-2. Router matches `Host(`gitea.<domain>`)`.
-3. ACME certresolver requests/renews a cert for that hostname (or the wildcard already covers it).
-4. Service is live at `https://gitea.<domain>`.
 
 ### Manual drop-in (same result)
 
@@ -84,7 +85,7 @@ Copy `config/dynamic/apps/_template.yml`, set subdomain + upstream URL, save as 
 ### Checklist when something is new on the network
 
 1. Guest reachable from Traefik on the services network.
-2. Run `add-service.sh` (or drop in YAML).
+2. Add via GUI (or `add-service.sh` / YAML drop-in).
 3. Confirm `https://<name>.<domain>` (cert appears automatically).
 4. Remove any old direct port-forward for that app.
 
@@ -298,6 +299,7 @@ This repo mirrors that under `config/`.
 ```text
 .
 ├── README.md
+├── gui/                       # Web admin UI (services + settings)
 ├── docs/
 │   ├── architecture.md
 │   ├── networking.md
@@ -310,11 +312,13 @@ This repo mirrors that under `config/`.
 │       ├── pve.yml
 │       └── apps/
 │           ├── _template.yml
+│           ├── gate.yml       # route to the admin GUI
 │           └── whoami.yml
 ├── scripts/
-│   └── add-service.sh         # easy subdomain route generator
+│   └── add-service.sh         # CLI subdomain route generator
 └── deploy/
-    └── sync-config.sh
+    ├── sync-config.sh
+    └── gate-admin.service
 ```
 
 ---

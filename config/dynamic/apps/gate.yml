@@ -1,0 +1,23 @@
+# Admin GUI for managing Gate routes/settings.
+# Point upstream at the host/port where `python -m gui` listens.
+# https://gate.example.com
+
+http:
+  routers:
+    gate:
+      rule: "Host(`gate.example.com`)"
+      entryPoints:
+        - websecure
+      tls:
+        certResolver: le
+      service: gate
+      middlewares:
+        - secured
+        - admin-allowlist
+
+  services:
+    gate:
+      loadBalancer:
+        passHostHeader: true
+        servers:
+          - url: "http://127.0.0.1:8080"

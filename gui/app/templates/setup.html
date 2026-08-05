@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="auth-panel">
+  <p class="eyebrow">First run</p>
+  <h1 class="auth-title">Create admin</h1>
+  <p class="lede">Set the operator account for this Gate GUI. Traefik config stays on disk; this only protects the admin UI.</p>
+  <form method="post" action="/setup" class="stack">
+    <label>
+      <span>Username</span>
+      <input name="username" value="admin" autocomplete="username" required autofocus />
+    </label>
+    <label>
+      <span>Password</span>
+      <input type="password" name="password" autocomplete="new-password" minlength="8" required />
+    </label>
+    <label>
+      <span>Confirm password</span>
+      <input type="password" name="password2" autocomplete="new-password" minlength="8" required />
+    </label>
+    <button class="btn primary" type="submit">Create account</button>
+  </form>
+</section>
+{% endblock %}
