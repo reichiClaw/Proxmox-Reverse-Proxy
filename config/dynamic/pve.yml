@@ -1,0 +1,29 @@
+# Proxmox VE UI + API via subdomain.
+# Replace Host and upstream IP before deploy.
+# https://pve.example.com → https://<pve-ip>:8006
+
+http:
+  routers:
+    pve:
+      rule: "Host(`pve.example.com`)"
+      entryPoints:
+        - websecure
+      tls:
+        certResolver: le
+      service: pve
+      middlewares:
+        - secured
+        # - admin-allowlist
+
+  services:
+    pve:
+      loadBalancer:
+        passHostHeader: true
+        serversTransport: pve-transport
+        servers:
+          - url: "https://172.16.0.2:8006"
+
+  serversTransports:
+    pve-transport:
+      # Prefer an internal CA file later; OK on a trusted services network initially.
+      insecureSkipVerify: true

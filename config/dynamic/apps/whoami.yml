@@ -1,0 +1,22 @@
+# Smoke-test route. Point upstream at any whoami instance on the services net,
+# or replace the URL after you deploy one.
+# https://whoami.example.com
+
+http:
+  routers:
+    whoami:
+      rule: "Host(`whoami.example.com`)"
+      entryPoints:
+        - websecure
+      tls:
+        certResolver: le
+      service: whoami
+      middlewares:
+        - secured
+
+  services:
+    whoami:
+      loadBalancer:
+        passHostHeader: true
+        servers:
+          - url: "http://10.10.10.50:80"

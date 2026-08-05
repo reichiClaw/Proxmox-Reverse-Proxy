@@ -2,20 +2,26 @@
 
 A single reverse proxy sits in front of this Proxmox instance and becomes the **only public TLS entry point** for the hypervisor UI and all published services running in VMs / LXCs.
 
+## Design principles
+
+1. **Subdomain = service** — each published app gets its own hostname (`gitea.<domain>`, `pve.<domain>`, …).
+2. **Easy add** — publishing a service is one command (or one small YAML file); Traefik hot-reloads; no firewall changes per app.
+3. **Self-maintained certificates** — Traefik issues and renews TLS certs automatically via ACME. No manual upload, no cron you babysit.
+4. **One gate** — clients only hit `:443` (and `:80` for redirects / HTTP-01).
+
 ## Goals
 
-- **One gate**: Internet / LAN clients hit only `:443` (and `:80` for ACME redirects) on the proxy.
-- **TLS everywhere at the edge**: Terminate (or re-encrypt) TLS at the proxy; issue and renew certificates automatically.
-- **Versatile routing**: Host-based (preferred) and optional path-based routes to Proxmox VE, PBS, and any app in guests.
-- **Proxmox-aware**: Correct WebSocket / noVNC / xterm.js / API behavior for the PVE UI.
-- **Least privilege**: Guests stay on internal networks; only the proxy is exposed.
-- **Operable**: Declarative config, health checks, structured logs, easy add/remove of services.
+- TLS Main Gate for Proxmox VE, optional PBS, and all guest services.
+- Host-based (subdomain) routing as the default; path-based only when unavoidable.
+- Proxmox-aware WebSocket / noVNC / xterm.js / API behavior.
+- Guests stay on internal networks; only the proxy is exposed.
+- Declarative config in Git; add/remove services without touching Traefik’s static config.
 
 ## Non-goals (initial)
 
-- Full mesh service mesh / mTLS between every guest (can be added later).
-- Replacing Proxmox auth (SSO can be layered later via Authentik/Authelia).
-- Exposing arbitrary non-HTTP protocols without an explicit TCP/UDP router.
+- Full mesh mTLS between every guest.
+- Replacing Proxmox auth (SSO can be layered later).
+- Exposing arbitrary non-HTTP protocols without an explicit TCP router.
 
 ---
 
@@ -23,129 +29,182 @@ A single reverse proxy sits in front of this Proxmox instance and becomes the **
 
 | Layer | Choice | Why |
 |---|---|---|
-| Edge proxy | **Traefik v3** | Versatile: HTTP + TCP/UDP routers, ACME, middlewares, file/Docker providers, good WebSocket support, dashboard for ops |
-| Runtime | **Debian LXC** (unprivileged, nesting if Docker needed) on the Proxmox host | Cheap, easy to back up, clear blast radius vs installing on the PVE host OS |
-| Certificates | **Let’s Encrypt** (DNS-01 or HTTP-01) via Traefik ACME | Automatic renewals; DNS-01 if wildcard or no inbound `:80` |
-| Internal DNS | Pi-hole / AdGuard / CoreDNS / router DNS | `*.lab.example.com` → proxy VIP |
-| Optional auth gate | Authelia or Authentik (phase 2) | SSO / 2FA in front of non-Proxmox apps |
-| Optional WAF | CrowdSec Traefik bouncer (phase 2) | Abuse / brute-force filtering |
+| Edge proxy | **Traefik v3** | Hot-reload file provider, per-host ACME, middleware reuse, WebSockets |
+| Runtime | **Debian LXC** on the Proxmox host | Cheap, backupable, isolated from PVE host OS |
+| Certificates | **ACME (Let’s Encrypt)** via Traefik | Self-maintained: issue + renew automatically per subdomain (or one wildcard) |
+| DNS | Wildcard `*.<domain>` → Traefik IP | New subdomains need **no DNS change** |
+| Optional auth | Authelia / Authentik (later) | SSO in front of selected non-PVE apps |
 
-**Alternatives considered**
+**Why not Caddy / NPM / HAProxy as default?** Caddy is simpler but less flexible for mixed TCP and reusable middleware catalogs; NPM is UI-centric and weaker as GitOps; HAProxy needs more manual ACME wiring. Traefik best matches “versatile + easy subdomain adds + self-maintained certs.”
 
-- **Caddy**: Excellent automatic HTTPS, simpler config; less flexible for mixed TCP routers and dynamic discovery.
-- **Nginx Proxy Manager**: Friendly UI; weaker as infrastructure-as-code and for advanced TCP/middleware cases.
-- **HAProxy**: Outstanding performance; more manual TLS/ACME and less “versatile” out of the box.
+---
 
-Traefik is the default recommendation for *versatile* multi-service Proxmox labs.
+## Subdomain model
+
+```text
+https://pve.<domain>      → Proxmox VE :8006
+https://pbs.<domain>      → Proxmox Backup Server :8007   (optional)
+https://gitea.<domain>    → guest app
+https://jellyfin.<domain> → guest app
+https://<name>.<domain>   → any new service
+```
+
+Rules:
+
+- One **subdomain per service** (not path prefixes).
+- Name of the service file ≈ subdomain label (`gitea.yml` → `gitea.<domain>`).
+- Wildcard DNS `*.<domain>` A/AAAA → Traefik, so adding a route does not require a new DNS record.
+- Apex/`www` can point at a landing page or be unused.
+
+---
+
+## Easy service onboarding
+
+### Happy path (recommended)
+
+```bash
+# from this repo — creates config/dynamic/apps/gitea.yml
+./scripts/add-service.sh gitea http://10.10.10.20:3000
+
+# sync into the Traefik LXC (or let your deploy path pick it up)
+./deploy/sync-config.sh
+```
+
+What happens next, without further cert work:
+
+1. Traefik file provider picks up the new YAML (hot reload).
+2. Router matches `Host(`gitea.<domain>`)`.
+3. ACME certresolver requests/renews a cert for that hostname (or the wildcard already covers it).
+4. Service is live at `https://gitea.<domain>`.
+
+### Manual drop-in (same result)
+
+Copy `config/dynamic/apps/_template.yml`, set subdomain + upstream URL, save as `config/dynamic/apps/<name>.yml`.
+
+### Checklist when something is new on the network
+
+1. Guest reachable from Traefik on the services network.
+2. Run `add-service.sh` (or drop in YAML).
+3. Confirm `https://<name>.<domain>` (cert appears automatically).
+4. Remove any old direct port-forward for that app.
+
+No per-service firewall hole. No manual certificate steps.
+
+---
+
+## Self-maintained certificates
+
+Certificates are owned and lifecycle-managed by Traefik’s ACME client.
+
+| Concern | Behavior |
+|---|---|
+| Issue | Automatic when a router with `tls.certResolver` first serves a host |
+| Renew | Automatic before expiry (Traefik/ACME) |
+| Storage | `/var/lib/traefik/acme.json` (mode `600`, persisted, backed up) |
+| Redirect | `:80` → `:443` for all HTTP |
+| Operator work | Set ACME email + domain once in `config/base.env`; then none per service |
+
+### Two ACME modes
+
+| Mode | When to use | New subdomain UX |
+|---|---|---|
+| **HTTP-01, per-host certs** | Simple; port 80 reachable from the internet (or LAN CA that speaks ACME HTTP-01) | First request triggers issuance; short wait |
+| **DNS-01, wildcard `*.<domain>`** | No inbound 80, or instant certs for every new name | Zero ACME delay when adding services |
+
+Default in this repo’s static config: **HTTP-01 per host** (fewest external dependencies). Switch to DNS-01 wildcard when the DNS API token is available — best “add subdomain, it just works” experience.
+
+### Staging vs production
+
+Use Let’s Encrypt **staging** until the gate validates end-to-end, then flip to production in `config/traefik.yml` to avoid rate limits.
+
+### Backend TLS (separate from edge certs)
+
+| Backend | Mode |
+|---|---|
+| Typical apps | Edge HTTPS → plain HTTP on services net |
+| Proxmox VE / PBS | Edge HTTPS → HTTPS re-encrypt to `:8006` / `:8007` |
+| Hardened apps | Edge HTTPS → HTTPS with internal CA (later; drop `insecureSkipVerify`) |
+
+Edge certificates stay self-maintained either way; guest apps do not need public certs.
 
 ---
 
 ## High-level topology
 
 ```text
-                    Internet / LAN clients
-                              |
-                         :80 / :443
-                              |
-                    +---------+---------+
-                    |  Traefik (LXC)    |   TLS termination / re-encrypt
-                    |  Main Gate        |
-                    +---------+---------+
-                              |
-           +------------------+------------------+
-           |                  |                  |
-      pve.example.com   app.example.com    git.example.com
-           |                  |                  |
-      Proxmox VE :8006   App LXC/VM :8080   Gitea VM :3000
-      (HTTPS backend)    (HTTP backend)     (HTTP backend)
+                         clients
+                            |
+                       :80 / :443
+                            |
+                 +----------+-----------+
+                 | Traefik LXC          |
+                 | subdomain routers +  |
+                 | ACME cert store      |
+                 +----------+-----------+
+                            |
+        +-------------------+-------------------+
+        |                   |                   |
+   pve.<domain>       gitea.<domain>     jellyfin.<domain>
+        |                   |                   |
+   PVE :8006          App :3000            App :8096
 ```
 
-### Network model (recommended)
+### Network model
 
-1. **Front network** (`vmbr0` / WAN-facing or LAN VIP): Traefik binds `80/443` (and optionally a VIP via Keepalived later).
-2. **Services network** (`vmbr1` or SDN/VLAN): Proxmox guests and management UIs reachable only from Traefik (and admin jump hosts).
-3. Firewall on the Proxmox host / edge router:
-   - Allow WAN/LAN → Traefik `:80/:443` only.
-   - Allow Traefik → backends on required ports.
-   - Deny direct WAN → PVE `:8006`, PBS `:8007`, guest app ports.
-
-Keep a **break-glass** admin path (VPN or management VLAN) to PVE `:8006` if the proxy is down.
+1. **Front**: Traefik binds `80/443` (LAN and/or WAN).
+2. **Services net**: guests + PVE API reachable from Traefik only (plus admin/VPN).
+3. Edge firewall allows only Traefik `80/443` from untrusted networks.
+4. **Break-glass**: VPN/mgmt VLAN still reaches PVE `:8006` if the proxy is down.
 
 ---
 
-## TLS strategy (Main Gate)
-
-### Edge certificates
-
-- One certificate per hostname, **or** a wildcard `*.lab.example.com` via DNS-01.
-- Traefik ACME storage on a persistent volume (`/var/lib/traefik/acme.json`, mode `600`).
-- Force HTTPS redirect from `:80` → `:443`.
-- Modern TLS only (TLS 1.2+), strong cipher suites (Traefik defaults are fine; tighten later if needed).
-- HSTS enabled on public hostnames once cutover is stable.
-
-### Backend TLS
-
-| Backend | Mode | Notes |
-|---|---|---|
-| Proxmox VE / PBS | HTTPS → HTTPS (re-encrypt) | PVE serves TLS on 8006/8007; use `serversTransport` with custom CA or `insecureSkipVerify` only on trusted internal nets |
-| Typical apps | HTTPS → HTTP | Terminate at Traefik; plain HTTP on services net |
-| Sensitive apps | HTTPS → HTTPS | Guest has its own cert (internal CA) |
-
-### Hostname convention
-
-```text
-pve.<domain>      → Proxmox VE UI + API
-pbs.<domain>      → Proxmox Backup Server (if present)
-*.<domain>        → guest services (one hostname per published app)
-```
-
-Prefer **subdomain-per-service** over path-based routing; it avoids cookie/path breakage and certificate ambiguity.
-
----
-
-## Routing model
+## Routing internals
 
 ### Providers
 
-Use **file provider** (YAML) as source of truth for Proxmox labs:
+- **File provider** watches `config/dynamic/` (and `apps/*.yml`).
+- Static config (`traefik.yml`) rarely changes — entrypoints, ACME, providers only.
+- Optional Docker provider later; not required for VM/LXC labs.
 
-- Stable when guests are VMs/LXCs without Docker labels.
-- Easy to version in Git (this repo).
-- Optional: Docker provider later for a compose stack behind Traefik.
+### Per-service drop-in shape
 
-### Router pattern (per service)
+```yaml
+http:
+  routers:
+    gitea:
+      rule: "Host(`gitea.{{ env "DOMAIN" }}`)"   # rendered, or literal host in generated files
+      entryPoints: ["websecure"]
+      tls:
+        certResolver: le
+      service: gitea
+      middlewares: ["secured"]
 
-Each published service declares:
+  services:
+    gitea:
+      loadBalancer:
+        servers:
+          - url: "http://10.10.10.20:3000"
+        passHostHeader: true
+```
 
-1. **Entrypoint**: `websecure` (`:443`)
-2. **Rule**: `Host(`app.example.com`)`
-3. **TLS**: certresolver `le`
-4. **Service**: upstream URL(s) + health check
-5. **Middlewares** (as needed): headers, compress, auth, IP allowlist, rate limit
+Generated files from `add-service.sh` use a concrete hostname from `base.env` (`DOMAIN=…`) so Traefik needs no templating at runtime.
+
+### Shared middlewares
+
+Defined once in `middlewares.yml` (security headers, compress, optional allowlist). Services attach by name — no copy-paste of header blocks.
 
 ### TCP / non-HTTP
 
-For SSH, game servers, databases, MQTT, etc.:
-
-- Dedicated Traefik **TCP routers** with SNI or dedicated ports.
-- Or publish only via VPN — preferred for admin protocols.
-
-Do **not** put raw SSH to the Proxmox host on the public gate unless required; use VPN/WireGuard.
+Explicit Traefik TCP routers or VPN-only. Do not publish host SSH on the public gate by default.
 
 ---
 
-## Proxmox VE behind the proxy (critical details)
+## Proxmox VE behind the proxy
 
-Proxmox UI and API need:
-
-- WebSocket upgrade support (noVNC, xterm.js consoles)
-- Long-lived connections / adequate timeouts
-- Correct `Host` / `X-Forwarded-*` headers
-- Sticky behavior is usually unnecessary for a single node; for clusters, pin to the node that owns the resource or use the cluster endpoint carefully
-
-### Traefik service sketch
+Needs WebSocket upgrades, generous timeouts, `passHostHeader`, and HTTPS upstream.
 
 ```yaml
+# config/dynamic/pve.yml (committed example; adjust IP)
 http:
   routers:
     pve:
@@ -154,13 +213,7 @@ http:
       tls:
         certResolver: le
       service: pve
-      middlewares: ["pve-headers"]
-
-  middlewares:
-    pve-headers:
-      headers:
-        customRequestHeaders:
-          X-Forwarded-Proto: "https"
+      middlewares: ["secured"]
 
   services:
     pve:
@@ -172,18 +225,14 @@ http:
 
   serversTransports:
     pve-transport:
-      insecureSkipVerify: true   # replace with rootCAs once internal CA is ready
+      insecureSkipVerify: true
 ```
 
-### PVE-side expectations
-
-- Datacenter → Options → **ACM E / reverse proxy** related settings: ensure the node knows it may be reached via the external hostname where relevant (e.g. cookie / link generation).
-- Prefer leaving PVE listening on the services network only; do not port-forward `8006` publicly.
-- API tokens / scripts should target `https://pve.example.com` after cutover.
+Do not DNAT `:8006` publicly after cutover. Keep VPN break-glass.
 
 ---
 
-## Deployment layout on Proxmox
+## Deployment layout
 
 ### LXC profile
 
@@ -191,62 +240,33 @@ http:
 |---|---|
 | Template | Debian 12/13 |
 | Unprivileged | Yes |
-| Nesting | On if using Docker inside |
+| Nesting | On only if Docker-in-LXC |
 | CPU / RAM | 1–2 vCPU, 512 MB–1 GB |
-| Disk | 4–8 GB + bind-mount for certs/config |
-| NICs | eth0 on services net; optional second NIC on front net |
-| Features | Static IP; firewall enabled |
+| Disk | 4–8 GB + persist certs/config |
+| Network | Static IP on front (and optional services NIC) |
 
-### On-disk layout (inside Traefik LXC)
+### Paths inside the Traefik LXC
 
 ```text
-/etc/traefik/
-  traefik.yml           # static config: entrypoints, ACME, providers
-  dynamic/
-    middlewares.yml
-    pve.yml
-    pbs.yml
-    apps/
-      gitea.yml
-      ...
-/var/lib/traefik/
-  acme.json
-/var/log/traefik/
-  access.log
+/etc/traefik/traefik.yml
+/etc/traefik/dynamic/middlewares.yml
+/etc/traefik/dynamic/pve.yml
+/etc/traefik/dynamic/apps/*.yml
+/var/lib/traefik/acme.json
 ```
 
-This repository mirrors that tree under `config/` so changes are reviewed via PR and deployed by sync/CI.
-
-### Process supervision
-
-- Official Traefik binary or package, managed by **systemd**.
-- Or Docker Compose in the LXC if you want image-based upgrades — keep volumes for `acme.json` and `dynamic/`.
+This repo mirrors that under `config/`.
 
 ---
 
 ## Security model
 
-1. **Exposure**: Only Traefik ports publicly reachable.
-2. **Admin UIs**: IP allowlist middleware and/or VPN for `pve.`, `pbs.`, Traefik dashboard.
-3. **Auth**: Phase 1 = native app auth; Phase 2 = ForwardAuth (Authelia/Authentik) for selected apps. Be careful putting SSO in front of PVE itself until tested — console/API breakage is common; prefer VPN/allowlist for PVE.
-4. **Certificates**: Restrict permissions on `acme.json`; back it up encrypted.
-5. **Headers**: Trusted `X-Forwarded-For` only from Traefik; guests must not be directly reachable from untrusted networks.
-6. **Updates**: Unattended security updates on the Traefik LXC; Traefik version pinned and upgraded deliberately.
-7. **Observability**: Access logs + Prometheus metrics endpoint (internal only).
-
----
-
-## Service onboarding checklist
-
-For each new guest service:
-
-1. Assign internal IP / DNS name on the services network.
-2. Choose public hostname `app.<domain>`.
-3. Add a dynamic Traefik file (router + service + middlewares).
-4. Create DNS A/AAAA (or CNAME) → Traefik.
-5. Wait for ACME issuance; verify HTTPS and WebSockets if needed.
-6. Close any direct port forwards that bypass the gate.
-7. Document owner, upstream URL, and auth mode in the service catalog.
+1. Only Traefik `80/443` exposed.
+2. Admin UIs (`pve.`, Traefik dashboard): allowlist and/or VPN.
+3. Phase-1 auth = native app auth; ForwardAuth later for non-PVE apps.
+4. Protect `acme.json`; back it up encrypted.
+5. Guests must not be directly reachable from untrusted networks.
+6. Pin Traefik version; unattended OS security updates on the LXC.
 
 ---
 
@@ -254,74 +274,64 @@ For each new guest service:
 
 ### Phase 0 — Foundations
 
-- Create Traefik LXC, networks, DNS zone, firewall baseline.
-- Deploy static Traefik config with ACME (staging first).
-- Publish a trivial whoami/health service for end-to-end validation.
+- Traefik LXC, wildcard DNS, firewall baseline, `base.env`.
+- ACME staging + `whoami` subdomain smoke test.
 
 ### Phase 1 — Main Gate for Proxmox
 
-- Route `pve.<domain>` (and `pbs.<domain>` if applicable).
-- Validate UI login, node status, noVNC, xterm.js, API calls.
-- Remove public DNAT to `:8006` / `:8007`.
-- Keep VPN break-glass access.
+- `pve.<domain>` (+ `pbs.` if needed), console/API validation.
+- Remove public `:8006` / `:8007` forwards.
 
-### Phase 2 — Guest services
+### Phase 2 — Guest services via add-service
 
-- Migrate existing published apps behind host-based routes.
-- Standard middlewares: compress, security headers, optional allowlists.
-- Catalog all routes in Git.
+- Migrate apps with `./scripts/add-service.sh <name> <url>`.
+- Standard middlewares only unless a service needs extras.
 
-### Phase 3 — Hardening & extras
+### Phase 3 — Hardening
 
-- Internal CA for backend re-encrypt (drop `insecureSkipVerify`).
-- Optional ForwardAuth SSO for non-PVE apps.
-- CrowdSec / rate limits / geo blocks as needed.
-- Optional HA: second Traefik LXC + Keepalived VIP + shared cert storage strategy.
+- DNS-01 wildcard (optional), backend CA, SSO, CrowdSec, optional HA VIP.
 
 ---
 
-## Repository layout (proposed)
+## Repository layout
 
 ```text
 .
 ├── README.md
 ├── docs/
-│   ├── architecture.md          # this plan
-│   ├── networking.md            # VLANs, IPs, firewall rules
-│   └── runbook.md               # issue certs, add service, restore
+│   ├── architecture.md
+│   ├── networking.md
+│   └── runbook.md
 ├── config/
-│   ├── traefik.yml              # static config
+│   ├── base.env.example       # DOMAIN, ACME_EMAIL, …
+│   ├── traefik.yml            # static: entrypoints + ACME
 │   └── dynamic/
 │       ├── middlewares.yml
 │       ├── pve.yml
 │       └── apps/
-├── deploy/
-│   ├── lxc-create.sh            # idempotent LXC bootstrap notes/script
-│   └── sync-config.sh           # push config into Traefik LXC
-└── examples/
-    └── whoami.yml
+│           ├── _template.yml
+│           └── whoami.yml
+├── scripts/
+│   └── add-service.sh         # easy subdomain route generator
+└── deploy/
+    └── sync-config.sh
 ```
 
 ---
 
-## Open decisions (need environment specifics)
+## Open decisions
 
-Capture these before implementation:
-
-1. **Domain / DNS provider** (drives HTTP-01 vs DNS-01 and wildcard feasibility).
-2. **Public vs LAN-only gate** (split-horizon DNS? VPN-only admin?).
-3. **Single node vs cluster** (routing to local node vs cluster VIP).
-4. **IPv6** required or v4-only.
-5. **Docker-in-LXC** vs bare Traefik binary.
-6. **SSO** in scope for phase 2 or later.
-7. **Existing port forwards** inventory to migrate.
+1. **Domain** and whether wildcard DNS is available.
+2. **HTTP-01 vs DNS-01** (DNS provider API for wildcard).
+3. Public internet vs LAN-only gate.
+4. Traefik binary vs Docker-in-LXC.
+5. SSO timing.
 
 ---
 
 ## Success criteria
 
-- All intended services reachable only via `https://<service>.<domain>`.
-- Valid public certificates with automatic renewal.
-- Proxmox UI fully usable (including consoles) through the proxy.
-- Direct exposure of backend ports removed from the edge firewall.
-- Adding a new service is a small Git change + DNS record, without firewall sprawl.
+- New service = subdomain + one `add-service` (or one YAML); no cert ceremony.
+- Certs issue and renew without operator intervention.
+- `https://<name>.<domain>` distinguishes services cleanly.
+- PVE UI/consoles work through the gate; backend ports not public.

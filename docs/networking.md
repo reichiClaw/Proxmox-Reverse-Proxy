@@ -7,11 +7,13 @@ Fill in before Phase 0 deployment. Keep secrets out of Git; IPs and hostnames ar
 | Item | Value |
 |---|---|
 | Base domain | `example.com` |
+| Wildcard DNS | `*.example.com` → Traefik IP (**recommended**) |
 | PVE hostname | `pve.example.com` |
 | PBS hostname | `pbs.example.com` (optional) |
-| Wildcard | `*.example.com` (yes/no) |
-| ACME mode | HTTP-01 / DNS-01 |
+| Service pattern | `<name>.example.com` (one subdomain per service) |
+| ACME mode | HTTP-01 (default) / DNS-01 wildcard |
 | DNS provider | |
+| Cert maintenance | Automatic via Traefik ACME (`acme.json`) |
 
 ## Addresses
 

@@ -1,0 +1,29 @@
+http:
+  middlewares:
+    secured:
+      chain:
+        middlewares:
+          - security-headers
+          - compress
+
+    security-headers:
+      headers:
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+        stsPreload: false
+        contentTypeNosniff: true
+        browserXssFilter: true
+        referrerPolicy: "strict-origin-when-cross-origin"
+        customFrameOptionsValue: SAMEORIGIN
+
+    compress:
+      compress: {}
+
+    # Attach to admin UIs (pve, dashboard) when ready:
+    # middlewares: ["secured", "admin-allowlist"]
+    admin-allowlist:
+      ipAllowList:
+        sourceRange:
+          - "10.0.0.0/8"
+          - "172.16.0.0/12"
+          - "192.168.0.0/16"
