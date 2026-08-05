@@ -1,0 +1,26 @@
+# Drop-in service route template.
+# Prefer: ./scripts/add-service.sh <name> <upstream-url>
+#
+# Conventions:
+#   filename  → <name>.yml
+#   subdomain → <name>.<DOMAIN>
+#   TLS       → self-maintained by Traefik ACME (certResolver: le)
+
+http:
+  routers:
+    SERVICE_NAME:
+      rule: "Host(`SERVICE_NAME.DOMAIN`)"
+      entryPoints:
+        - websecure
+      tls:
+        certResolver: le
+      service: SERVICE_NAME
+      middlewares:
+        - secured
+
+  services:
+    SERVICE_NAME:
+      loadBalancer:
+        passHostHeader: true
+        servers:
+          - url: "UPSTREAM_URL"

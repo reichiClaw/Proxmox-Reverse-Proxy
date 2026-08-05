@@ -1,0 +1,48 @@
+# Static Traefik config — entrypoints, ACME, providers.
+# Service routes live in dynamic/ and are hot-reloaded.
+
+api:
+  dashboard: true
+  insecure: false
+
+entryPoints:
+  web:
+    address: ":80"
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+          permanent: true
+  websecure:
+    address: ":443"
+    http:
+      tls:
+        certResolver: le
+
+providers:
+  file:
+    directory: /etc/traefik/dynamic
+    watch: true
+
+certificatesResolvers:
+  le:
+    acme:
+      # Set to your address; mirror config/base.env ACME_EMAIL when deploying.
+      email: admin@example.com
+      storage: /var/lib/traefik/acme.json
+      # Use staging until the gate works end-to-end, then switch to production.
+      caServer: https://acme-staging-v02.api.letsencrypt.org/directory
+      # Production:
+      # caServer: https://acme-v02.api.letsencrypt.org/directory
+      httpChallenge:
+        entryPoint: web
+      # For wildcard certs (*.example.com) and easier subdomain adds, prefer DNS-01:
+      # dnsChallenge:
+      #   provider: cloudflare
+      #   delayBeforeCheck: 0
+
+log:
+  level: INFO
+
+accessLog: {}
