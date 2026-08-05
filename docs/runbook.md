@@ -8,7 +8,23 @@
 4. Deploy Traefik with `config/` mounted/synced to `/etc/traefik`.
 5. Keep ACME on **staging** until `https://whoami.<DOMAIN>` works, then switch to production CA in `traefik.yml`.
 
-## Add a service (normal path)
+## Add a service (GUI — preferred)
+
+1. Open `https://gate.<DOMAIN>` (or `http://<gui-host>:8080` on the services net).
+2. **Services → Add service**
+3. Enter subdomain label + upstream URL → Create route
+
+Traefik hot-reloads the drop-in; ACME issues the cert automatically.
+
+### Settings in the GUI
+
+**Settings** page edits:
+
+- Base domain (rewrites existing `*.domain` hosts when changed)
+- ACME email
+- Let’s Encrypt staging vs production
+
+## Add a service (CLI)
 
 ```bash
 ./scripts/add-service.sh <name> <upstream-url>
@@ -25,13 +41,15 @@ Result:
 - No new firewall rule if the guest is already on the services network
 - No new DNS record if wildcard `*.<DOMAIN>` already points at Traefik
 
-## Add a service (manual)
+## Add a service (manual YAML)
 
 1. Copy `config/dynamic/apps/_template.yml` → `apps/<name>.yml`
 2. Replace `SERVICE_NAME`, `DOMAIN`, `UPSTREAM_URL`
 3. Sync / wait for hot-reload
 
 ## Remove a service
+
+GUI: **Services → Delete**, or:
 
 ```bash
 rm config/dynamic/apps/<name>.yml

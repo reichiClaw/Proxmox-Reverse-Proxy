@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <h1>Services</h1>
+    <p class="lede">Each row is a subdomain on <code>{{ settings.domain }}</code>. Certificates are issued and renewed by Traefik ACME.</p>
+  </div>
+  <a class="btn primary" href="/services/new">Add service</a>
+</section>
+
+{% if services %}
+<table class="svc-table">
+  <thead>
+    <tr>
+      <th>Subdomain</th>
+      <th>Upstream</th>
+      <th>Kind</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for s in services %}
+    <tr>
+      <td>
+        <a class="host" href="{{ s.public_url }}" target="_blank" rel="noopener">{{ s.host }}</a>
+        <div class="muted name">{{ s.name }}</div>
+      </td>
+      <td><code class="upstream">{{ s.upstream }}</code></td>
+      <td><span class="tag {{ s.source }}">{{ s.source }}</span></td>
+      <td class="actions">
+        <a class="btn ghost" href="/services/{{ s.name }}/edit">Edit</a>
+        {% if s.source != 'system' %}
+        <form method="post" action="/services/{{ s.name }}/delete" onsubmit="return confirm('Remove {{ s.name }}?');">
+          <button class="btn danger ghost" type="submit">Delete</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="empty">
+  <p>No services yet.</p>
+  <a class="btn primary" href="/services/new">Add your first subdomain route</a>
+</div>
+{% endif %}
+{% endblock %}

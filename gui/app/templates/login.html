@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="auth-panel">
+  <p class="eyebrow">Proxmox TLS Main Gate</p>
+  <h1 class="auth-title">Gate</h1>
+  <p class="lede">Sign in to manage subdomain routes and certificate settings.</p>
+  <form method="post" action="/login" class="stack">
+    <input type="hidden" name="next" value="{{ next }}" />
+    <label>
+      <span>Username</span>
+      <input name="username" autocomplete="username" required autofocus />
+    </label>
+    <label>
+      <span>Password</span>
+      <input type="password" name="password" autocomplete="current-password" required />
+    </label>
+    <button class="btn primary" type="submit">Sign in</button>
+  </form>
+</section>
+{% endblock %}

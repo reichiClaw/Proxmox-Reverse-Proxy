@@ -1,0 +1,1 @@
+"""Proxmox Gate admin GUI."""
