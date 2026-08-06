@@ -1,12 +1,14 @@
 # Runbook
 
-## One-time setup
+For first-time installation on Proxmox, follow **[install-proxmox.md](install-proxmox.md)**.
+
+## One-time setup (summary)
 
 1. Copy `config/base.env.example` → `config/base.env` and set `DOMAIN` + `ACME_EMAIL`.
 2. Set the same ACME email in `config/traefik.yml`.
 3. Point wildcard DNS `*.<DOMAIN>` (and optionally apex) at the Traefik IP.
-4. Deploy Traefik with `config/` mounted/synced to `/etc/traefik`.
-5. Keep ACME on **staging** until `https://whoami.<DOMAIN>` works, then switch to production CA in `traefik.yml`.
+4. Deploy Traefik with `config/` mounted/synced (or symlinked) to `/etc/traefik`.
+5. Keep ACME on **staging** until `https://whoami.<DOMAIN>` works, then switch to production CA in `traefik.yml` (or Gate → Settings).
 
 ## Add a service (GUI — preferred)
 

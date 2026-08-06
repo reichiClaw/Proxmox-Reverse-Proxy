@@ -2,6 +2,8 @@
 
 Web UI to add/edit/delete subdomain services and change domain / ACME settings. Writes the same Traefik drop-in files as `scripts/add-service.sh`.
 
+For full Proxmox deployment (LXC + Traefik + this GUI), see **[docs/install-proxmox.md](../docs/install-proxmox.md)**.
+
 ## Run locally
 
 ```bash
