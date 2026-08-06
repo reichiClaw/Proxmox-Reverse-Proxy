@@ -32,11 +32,18 @@ The GUI writes the same Traefik YAML drop-ins as the CLI. Publish it at `gate.<d
 TRAEFIK_LXC=101 ./deploy/sync-config.sh
 ```
 
+## Install on Proxmox
+
+Step-by-step (LXC, Traefik, DNS, ACME, Gate GUI, PVE cutover):
+
+**[docs/install-proxmox.md](docs/install-proxmox.md)**
+
 ## Docs
 
 | Doc | Contents |
 |---|---|
-| [docs/architecture.md](docs/architecture.md) | Full design: topology, TLS, security, phases |
+| [docs/install-proxmox.md](docs/install-proxmox.md) | **Full Proxmox install manual** |
+| [docs/architecture.md](docs/architecture.md) | Design: topology, TLS, security, phases |
 | [docs/runbook.md](docs/runbook.md) | GUI/CLI add-remove, certs, PVE cutover |
 | [docs/networking.md](docs/networking.md) | Domains, IPs, firewall worksheet |
 | [gui/README.md](gui/README.md) | Admin GUI setup |
