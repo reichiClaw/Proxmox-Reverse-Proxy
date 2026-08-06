@@ -2,6 +2,8 @@
 
 A single reverse proxy sits in front of this Proxmox instance and becomes the **only public TLS entry point** for the hypervisor UI and all published services running in VMs / LXCs.
 
+**Installing on Proxmox?** Start with [install-proxmox.md](install-proxmox.md).
+
 ## Design principles
 
 1. **Subdomain = service** — each published app gets its own hostname (`gitea.<domain>`, `pve.<domain>`, …).
