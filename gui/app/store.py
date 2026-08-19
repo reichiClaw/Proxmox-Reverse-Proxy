@@ -208,6 +208,11 @@ def validate_upstream(upstream: str) -> str:
     else that could terminate the string or alter the rendered config.
     """
     upstream = upstream.strip()
+    # urlsplit strips \r\n\t before parsing (WHATWG alignment), so control
+    # characters must be rejected on the raw string or they would survive
+    # into the rendered YAML.
+    if any(ord(c) < 0x21 or c in '"`\\\x7f' for c in upstream):
+        raise ValueError("Upstream contains whitespace or control characters.")
     try:
         parts = urlsplit(upstream)
     except ValueError as exc:

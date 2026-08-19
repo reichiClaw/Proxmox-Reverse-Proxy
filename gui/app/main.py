@@ -171,7 +171,7 @@ async def home(request: Request):
 async def setup_get(request: Request):
     if not is_bootstrap_required():
         return RedirectResponse("/login", status_code=303)
-    return TEMPLATES.TemplateResponse("setup.html", _ctx(request, title="Initial setup"))
+    return TEMPLATES.TemplateResponse(request, "setup.html", _ctx(request, title="Initial setup"))
 
 
 @app.post("/setup")
@@ -210,6 +210,7 @@ async def login_get(request: Request):
     if current_user(request):
         return RedirectResponse("/services", status_code=303)
     return TEMPLATES.TemplateResponse(
+        request,
         "login.html",
         _ctx(request, title="Sign in", next=_safe_next(request.query_params.get("next", "/services"))),
     )
@@ -261,6 +262,7 @@ async def services_list(request: Request):
     if redir := _require_login(request):
         return redir
     return TEMPLATES.TemplateResponse(
+        request,
         "services.html",
         _ctx(request, title="Services", services=list_services()),
     )
@@ -271,6 +273,7 @@ async def services_new(request: Request):
     if redir := _require_login(request):
         return redir
     return TEMPLATES.TemplateResponse(
+        request,
         "service_form.html",
         _ctx(request, title="Add service", mode="create", service=None),
     )
@@ -306,6 +309,7 @@ async def services_edit(name: str, request: Request):
         _flash(request, "Service not found.", "error")
         return RedirectResponse("/services", status_code=303)
     return TEMPLATES.TemplateResponse(
+        request,
         "service_form.html",
         _ctx(request, title=f"Edit {name}", mode="edit", service=svc),
     )
@@ -357,7 +361,7 @@ async def services_delete(
 async def settings_get(request: Request):
     if redir := _require_login(request):
         return redir
-    return TEMPLATES.TemplateResponse("settings.html", _ctx(request, title="Settings"))
+    return TEMPLATES.TemplateResponse(request, "settings.html", _ctx(request, title="Settings"))
 
 
 @app.post("/settings")
