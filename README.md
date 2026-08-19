@@ -34,8 +34,18 @@ TRAEFIK_LXC=101 ./deploy/sync-config.sh
 
 ## Install on Proxmox
 
-Step-by-step (LXC, Traefik, DNS, ACME, Gate GUI, PVE cutover):
+One-shot install — on the Proxmox host as root:
 
+```bash
+git clone https://github.com/reichiClaw/Proxmox-Reverse-Proxy.git
+cd Proxmox-Reverse-Proxy
+./deploy/install-proxmox.sh --vmid 110 --ip 192.168.1.10/24 \
+  --gateway 192.168.1.1 --domain lab.example.com --acme-email you@lab.example.com
+```
+
+Creates the LXC, installs Traefik (checksum-verified) + Gate GUI as hardened
+systemd services, wires up verified TLS to Proxmox, and prints the DNS /
+port-forward follow-ups. Step-by-step manual alternative:
 **[docs/install-proxmox.md](docs/install-proxmox.md)**
 
 ## Docs

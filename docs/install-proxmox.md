@@ -7,7 +7,48 @@ This guide walks through installing **Proxmox Reverse Proxy** (Traefik + Gate ad
 - **TLS certificates are self-maintained** (Let’s Encrypt via Traefik ACME)
 - you manage routes from the **Gate web GUI** (or CLI / YAML)
 
-Related docs: [architecture.md](architecture.md) · [networking.md](networking.md) · [runbook.md](runbook.md) · [gui/README.md](../gui/README.md)
+Related docs: [architecture.md](architecture.md) · [security.md](security.md) · [networking.md](networking.md) · [runbook.md](runbook.md) · [gui/README.md](../gui/README.md)
+
+---
+
+## 0. Automated install (recommended)
+
+Everything in sections 4–11 can be done by one script. On the **Proxmox VE
+host**, as root:
+
+```bash
+apt -y install git   # if missing
+git clone https://github.com/reichiClaw/Proxmox-Reverse-Proxy.git
+cd Proxmox-Reverse-Proxy
+./deploy/install-proxmox.sh \
+  --vmid 110 \
+  --ip 192.168.1.10/24 \
+  --gateway 192.168.1.1 \
+  --domain lab.example.com \
+  --acme-email you@lab.example.com
+```
+
+The script:
+
+1. Downloads a Debian 12 template (if needed) and creates an unprivileged LXC
+2. Installs Traefik (pinned version, **checksum-verified**) and the Gate GUI
+   as hardened systemd services
+3. Copies `/etc/pve/pve-root-ca.pem` into the container so backend TLS to
+   Proxmox is **verified**
+4. Configures your domain, ACME email (staging CA first), and the PVE
+   upstream (defaults to this host's IP `:8006`)
+5. Installs a local whoami service for the smoke test (skip: `--no-whoami`)
+6. Enables ufw allowing only 80/443 (skip: `--no-firewall`)
+7. Prints the required follow-ups: wildcard DNS, port forwards, and
+   **creating the GUI admin account immediately**
+
+Useful options: `--storage`, `--bridge`, `--pve-upstream`, `--dry-run`
+(prints host-side actions without executing), `-h` for all flags.
+No container root password is set — use `pct enter <vmid>`.
+
+Afterwards continue with [§11 (smoke test)](#11-first-smoke-test-staging-certificates)
+and [§12 (Proxmox cutover)](#12-put-proxmox-ve-behind-the-gate).
+The manual path below produces the same result step by step.
 
 ---
 
@@ -846,6 +887,16 @@ systemctl restart traefik
 3. Staging vs production CA mismatch?
 4. Logs: `journalctl -u traefik -n 100 --no-pager`
 5. `acme.json` writable / mode `600`?
+
+### TLS error "unrecognized name" / connection rejected on a new subdomain
+
+The TLS policy sets `sniStrict: true` (`config/dynamic/tls.yml`): Traefik
+refuses handshakes for hostnames it has **no certificate** for instead of
+serving its default self-signed one. So until ACME has issued the cert for a
+subdomain (seconds normally, never if DNS/ACME is failing), connections are
+rejected with a TLS alert rather than a certificate warning. Fix the
+certificate issuance (see above) — do not disable `sniStrict`; it keeps
+scanners hitting the bare IP from getting a TLS response.
 
 ### 404 / no route
 
