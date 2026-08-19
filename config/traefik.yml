@@ -1,13 +1,22 @@
 # Static Traefik config — entrypoints, ACME, providers.
 # Service routes live in dynamic/ and are hot-reloaded.
+# TLS options (min version, ciphers) live in dynamic/tls.yml.
 
+# The API/dashboard is disabled by default to keep the attack surface small.
+# To enable it, set dashboard: true AND publish api@internal behind a router
+# with authentication + an IP allowlist. Never set api.insecure: true.
 api:
-  dashboard: true
+  dashboard: false
   insecure: false
 
 entryPoints:
   web:
     address: ":80"
+    transport:
+      respondingTimeouts:
+        # Port 80 only serves redirects and ACME HTTP-01 — keep it tight.
+        readTimeout: 30s
+        idleTimeout: 60s
     http:
       redirections:
         entryPoint:
@@ -16,9 +25,24 @@ entryPoints:
           permanent: true
   websecure:
     address: ":443"
+    transport:
+      respondingTimeouts:
+        # readTimeout/writeTimeout are 0 (disabled) on purpose: Proxmox ISO
+        # uploads, backup restores, and long-lived noVNC/xterm.js WebSockets
+        # legitimately exceed any fixed request deadline. Slow-client abuse is
+        # bounded by idleTimeout plus the rate-limit middlewares in
+        # dynamic/middlewares.yml.
+        readTimeout: 0
+        writeTimeout: 0
+        idleTimeout: 180s
     http:
       tls:
         certResolver: le
+    # Traefik drops client-supplied X-Forwarded-* headers by default.
+    # Only add trustedIPs if a load balancer / CDN you control sits in front:
+    # forwardedHeaders:
+    #   trustedIPs:
+    #     - "192.0.2.10/32"
 
 providers:
   file:
@@ -45,4 +69,6 @@ certificatesResolvers:
 log:
   level: INFO
 
+# Access logs: request metadata only. Header logging stays off (default) so
+# Cookie / Authorization / PVE tickets are never written to disk.
 accessLog: {}

@@ -1,0 +1,21 @@
+# TLS policy for all incoming HTTPS connections.
+# The "default" option set applies to every router that does not name another.
+
+tls:
+  options:
+    default:
+      minVersion: VersionTLS12
+      # Reject clients that do not send SNI matching a known certificate;
+      # prevents probing the gate by bare IP.
+      sniStrict: true
+      # TLS 1.3 suites are fixed by the standard; this list applies to TLS 1.2.
+      cipherSuites:
+        - TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+        - TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+        - TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
+        - TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+        - TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305
+        - TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305
+      curvePreferences:
+        - X25519
+        - CurveP256

@@ -1,6 +1,16 @@
 # Proxmox VE UI + API via subdomain.
 # Replace Host and upstream IP before deploy.
 # https://pve.example.com → https://<pve-ip>:8006
+#
+# TLS to the PVE backend is VERIFIED against the Proxmox cluster root CA.
+# Install it once on the gate (see docs/install-proxmox.md §8.4):
+#   mkdir -p /etc/traefik/certs
+#   scp root@<pve-ip>:/etc/pve/pve-root-ca.pem /etc/traefik/certs/pve-root-ca.pem
+# The default pve-ssl.pem certificate includes the node's name and IP in its
+# SANs, so verification works when the upstream URL uses the node IP.
+# If your PVE node serves a publicly trusted certificate (e.g. Let's Encrypt
+# via ACME on the node), delete the rootCAs block — the system trust store is
+# used by default. Never use insecureSkipVerify.
 
 http:
   routers:
@@ -13,6 +23,7 @@ http:
       service: pve
       middlewares:
         - secured
+        # Strongly recommended: restrict the hypervisor UI to trusted networks.
         # - admin-allowlist
 
   services:
@@ -25,5 +36,8 @@ http:
 
   serversTransports:
     pve-transport:
-      # Prefer an internal CA file later; OK on a trusted services network initially.
-      insecureSkipVerify: true
+      rootCAs:
+        - /etc/traefik/certs/pve-root-ca.pem
+      # If the upstream URL uses an IP but your PVE certificate only carries
+      # the node's DNS name in its SANs, set the name to verify against:
+      # serverName: "pve1.internal.example.com"

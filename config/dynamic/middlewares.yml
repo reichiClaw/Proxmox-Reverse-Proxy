@@ -21,9 +21,26 @@ http:
 
     # Attach to admin UIs (pve, dashboard) when ready:
     # middlewares: ["secured", "admin-allowlist"]
+    # ipAllowList matches on the direct connection's remote address (Traefik
+    # does not trust client-supplied X-Forwarded-For unless trustedIPs is
+    # configured on the entrypoint).
     admin-allowlist:
       ipAllowList:
         sourceRange:
           - "10.0.0.0/8"
           - "172.16.0.0/12"
           - "192.168.0.0/16"
+
+    # Per-source-IP rate limit for authentication-sensitive routes (Gate GUI,
+    # optionally pve). Slows credential stuffing without hurting normal use.
+    auth-ratelimit:
+      rateLimit:
+        average: 10
+        burst: 30
+        period: 1s
+
+    # The Gate admin GUI only receives small HTML forms — cap request bodies.
+    gate-buffering:
+      buffering:
+        maxRequestBodyBytes: 1048576
+        memRequestBodyBytes: 262144
