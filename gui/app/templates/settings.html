@@ -8,6 +8,7 @@
 </section>
 
 <form method="post" action="/settings" class="form-grid">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
   <label>
     <span>Base domain</span>
     <input name="domain" value="{{ settings.domain }}" required />

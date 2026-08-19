@@ -9,13 +9,39 @@ Environment=GATE_REPO_ROOT=/opt/gate
 Environment=GATE_HOST=127.0.0.1
 Environment=GATE_PORT=8080
 Environment=GATE_HTTPS_ONLY=1
-EnvironmentFile=-/opt/gate/config/gui.env
-# Set GATE_SESSION_SECRET in /etc/gate-admin.env
+# GATE_SESSION_SECRET lives in /etc/gate-admin.env (root:root, 0600).
+# Note: gui.env (the password hash) is read by the app from disk and is
+# deliberately NOT loaded into the process environment.
 EnvironmentFile=-/etc/gate-admin.env
 ExecStart=/opt/gate/.venv/bin/python -m gui
 Restart=on-failure
+RestartSec=5
 User=gate
 Group=gate
+UMask=0077
+
+# Sandboxing: the GUI only needs to read /opt/gate and write /opt/gate/config.
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/gate/config
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+CapabilityBoundingSet=
 
 [Install]
 WantedBy=multi-user.target

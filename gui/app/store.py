@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import os
 import re
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import yaml
 
@@ -16,9 +18,20 @@ from .paths import (
     TRAEFIK_YML,
 )
 
-NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$")
+# Values written into Traefik YAML or Host(`...`) rules are validated against
+# strict allowlists. This is the barrier that keeps an authenticated GUI admin
+# (or a compromised session) from injecting arbitrary Traefik configuration —
+# routers, middlewares, or catch-all rules — through crafted form input.
+NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
+DOMAIN_RE = re.compile(
+    r"^(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]([a-z0-9-]{0,61}[a-z0-9])?$"
+)
+EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
+MIDDLEWARE_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+UPSTREAM_HOST_RE = re.compile(r"^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$")
+UPSTREAM_IPV6_RE = re.compile(r"^[0-9a-f:]+$")
+UPSTREAM_PATH_RE = re.compile(r"^/[A-Za-z0-9._~%/-]*$")
 HOST_RE = re.compile(r"Host\(`([^`]+)`\)")
-EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 RESERVED_NAMES = {"_template", "admin", "gate", "traefik"}
 
 STAGING_CA = "https://acme-staging-v02.api.letsencrypt.org/directory"
@@ -67,13 +80,25 @@ def _write_env_file(path: Path, values: dict[str, str], header: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = [header.rstrip(), ""]
     for key, value in values.items():
+        # Newlines in a value would let one field smuggle extra variables
+        # into the env file (which systemd may load) — reject outright.
+        if any(c in f"{key}{value}" for c in ("\n", "\r", "\0")):
+            raise ValueError("Env values must not contain newlines.")
         lines.append(f"{key}={value}")
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    content = "\n".join(lines) + "\n"
+    # Env files can hold credentials (gui.env): create/keep them 0600.
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        os.write(fd, content.encode("utf-8"))
+    finally:
+        os.close(fd)
+    os.chmod(path, 0o600)
 
 
 def ensure_base_env() -> None:
     if not BASE_ENV.exists() and BASE_ENV_EXAMPLE.exists():
         shutil.copy(BASE_ENV_EXAMPLE, BASE_ENV)
+        os.chmod(BASE_ENV, 0o600)
 
 
 def load_settings() -> Settings:
@@ -114,11 +139,23 @@ def save_gui_auth(user: str, password_hash: str) -> None:
     )
 
 
-def save_settings(settings: Settings, *, rewrite_hosts: bool = True) -> None:
-    if not settings.domain or "." not in settings.domain:
-        raise ValueError("DOMAIN must look like example.com")
-    if not EMAIL_RE.match(settings.acme_email):
+def validate_domain(domain: str) -> str:
+    domain = domain.strip().lower().rstrip(".")
+    if not DOMAIN_RE.match(domain):
+        raise ValueError("Domain must be a valid DNS name like example.com")
+    return domain
+
+
+def validate_email(email: str) -> str:
+    email = email.strip()
+    if not EMAIL_RE.match(email):
         raise ValueError("ACME email looks invalid")
+    return email
+
+
+def save_settings(settings: Settings, *, rewrite_hosts: bool = True) -> None:
+    settings.domain = validate_domain(settings.domain)
+    settings.acme_email = validate_email(settings.acme_email)
 
     old = load_settings()
     _write_env_file(
@@ -164,10 +201,45 @@ def validate_name(name: str) -> str:
 
 
 def validate_upstream(upstream: str) -> str:
+    """Allow only scheme://host[:port][/path] with a strict character set.
+
+    The upstream is written into Traefik YAML inside double quotes; the
+    allowlist excludes quotes, backticks, whitespace, userinfo and anything
+    else that could terminate the string or alter the rendered config.
+    """
     upstream = upstream.strip()
-    if not re.match(r"^https?://", upstream):
+    try:
+        parts = urlsplit(upstream)
+    except ValueError as exc:
+        raise ValueError("Upstream is not a valid URL.") from exc
+    if parts.scheme not in ("http", "https"):
         raise ValueError("Upstream must start with http:// or https://")
+    if parts.username or parts.password:
+        raise ValueError("Upstream must not contain credentials.")
+    if parts.query or parts.fragment:
+        raise ValueError("Upstream must not contain a query string or fragment.")
+    host = parts.hostname or ""
+    if host.startswith("[") or ":" in host:
+        if not UPSTREAM_IPV6_RE.match(host.strip("[]").lower()):
+            raise ValueError("Upstream IPv6 address is invalid.")
+    elif not UPSTREAM_HOST_RE.match(host.lower()):
+        raise ValueError("Upstream host must be a DNS name or IP address.")
+    try:
+        port = parts.port
+    except ValueError as exc:
+        raise ValueError("Upstream port must be between 1 and 65535.") from exc
+    if port is not None and not (1 <= port <= 65535):
+        raise ValueError("Upstream port must be between 1 and 65535.")
+    if parts.path and not UPSTREAM_PATH_RE.match(parts.path):
+        raise ValueError("Upstream path contains unsupported characters.")
     return upstream
+
+
+def validate_middlewares(middlewares: list[str]) -> list[str]:
+    for mw in middlewares:
+        if not isinstance(mw, str) or not MIDDLEWARE_RE.match(mw):
+            raise ValueError(f"Invalid middleware reference: {mw!r}")
+    return list(middlewares)
 
 
 def _parse_service_doc(path: Path, source: str) -> Service | None:
@@ -232,7 +304,7 @@ def get_service(name: str) -> Service | None:
 
 
 def _render_app_yaml(name: str, domain: str, upstream: str, middlewares: list[str] | None = None) -> str:
-    mws = middlewares or ["secured"]
+    mws = validate_middlewares(middlewares or ["secured"])
     mw_yaml = "\n".join(f"        - {m}" for m in mws)
     host = f"{name}.{domain}"
     return (
@@ -265,12 +337,13 @@ def create_service(name: str, upstream: str) -> Service:
     name = validate_name(name)
     upstream = validate_upstream(upstream)
     settings = load_settings()
+    domain = validate_domain(settings.domain)
     APPS_DIR.mkdir(parents=True, exist_ok=True)
     path = APPS_DIR / f"{name}.yml"
     if path.exists():
         raise ValueError(f"Service '{name}' already exists.")
     path.write_text(
-        _render_app_yaml(name, settings.domain, upstream),
+        _render_app_yaml(name, domain, upstream),
         encoding="utf-8",
     )
     svc = get_service(name)
@@ -287,13 +360,14 @@ def update_service(name: str, *, upstream: str | None = None, new_name: str | No
 
     upstream = validate_upstream(upstream if upstream is not None else svc.upstream)
     settings = load_settings()
+    domain = validate_domain(settings.domain)
     target_name = validate_name(new_name) if new_name and new_name != name else name
     new_path = APPS_DIR / f"{target_name}.yml"
 
     if target_name != name and new_path.exists():
         raise ValueError(f"Service '{target_name}' already exists.")
 
-    content = _render_app_yaml(target_name, settings.domain, upstream, svc.middlewares)
+    content = _render_app_yaml(target_name, domain, upstream, svc.middlewares)
     new_path.write_text(content, encoding="utf-8")
     if target_name != name and svc.path and svc.path.exists():
         svc.path.unlink()

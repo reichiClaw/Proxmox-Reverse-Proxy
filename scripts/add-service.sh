@@ -56,8 +56,11 @@ if [[ ! "$NAME" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]]; then
   exit 1
 fi
 
-if [[ ! "$UPSTREAM" =~ ^https?:// ]]; then
-  echo "Upstream must start with http:// or https://" >&2
+# Strict allowlist: scheme://host[:port][/path]. Excludes quotes, backticks,
+# spaces, sed metacharacters (| & \) and anything else that could break the
+# generated YAML or the sed substitution below.
+if [[ ! "$UPSTREAM" =~ ^https?://(\[[0-9A-Fa-f:]+\]|[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?)(:[0-9]{1,5})?(/[A-Za-z0-9._~%/-]*)?$ ]]; then
+  echo "Upstream must look like http(s)://host[:port][/path]" >&2
   exit 1
 fi
 

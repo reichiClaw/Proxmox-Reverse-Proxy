@@ -30,7 +30,8 @@
       <td class="actions">
         <a class="btn ghost" href="/services/{{ s.name }}/edit">Edit</a>
         {% if s.source != 'system' %}
-        <form method="post" action="/services/{{ s.name }}/delete" onsubmit="return confirm('Remove {{ s.name }}?');">
+        <form method="post" action="/services/{{ s.name }}/delete" data-confirm="Remove {{ s.name }}?">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
           <button class="btn danger ghost" type="submit">Delete</button>
         </form>
         {% endif %}

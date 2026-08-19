@@ -14,12 +14,13 @@
 </section>
 
 <form method="post" class="form-grid">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
   <label>
     <span>Name (subdomain label)</span>
     {% if mode == 'create' %}
-    <input name="name" placeholder="gitea" pattern="[a-z0-9]([-a-z0-9]*[a-z0-9])?" required autofocus />
+    <input name="name" placeholder="gitea" pattern="[a-z0-9]([-a-z0-9]*[a-z0-9])?" data-host-preview="{{ settings.domain }}" required autofocus />
     {% else %}
-    <input name="new_name" value="{{ service.name }}" pattern="[a-z0-9]([-a-z0-9]*[a-z0-9])?" {% if service.source == 'system' %}readonly{% endif %} required autofocus />
+    <input name="new_name" value="{{ service.name }}" pattern="[a-z0-9]([-a-z0-9]*[a-z0-9])?" data-host-preview="{{ settings.domain }}" {% if service.source == 'system' %}readonly{% endif %} required autofocus />
     {% endif %}
     <small>Public host: <code id="host-preview">{% if service %}{{ service.host }}{% else %}name.{{ settings.domain }}{% endif %}</code></small>
   </label>
@@ -35,18 +36,4 @@
     <a class="btn ghost" href="/services">Cancel</a>
   </div>
 </form>
-
-<script>
-  const domain = {{ settings.domain|tojson }};
-  const input = document.querySelector('input[name="name"], input[name="new_name"]');
-  const preview = document.getElementById('host-preview');
-  if (input && preview) {
-    const sync = () => {
-      const v = (input.value || 'name').toLowerCase();
-      preview.textContent = v + '.' + domain;
-    };
-    input.addEventListener('input', sync);
-    sync();
-  }
-</script>
 {% endblock %}
