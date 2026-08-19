@@ -43,6 +43,7 @@ Step-by-step (LXC, Traefik, DNS, ACME, Gate GUI, PVE cutover):
 | Doc | Contents |
 |---|---|
 | [docs/install-proxmox.md](docs/install-proxmox.md) | **Full Proxmox install manual** |
+| [docs/security.md](docs/security.md) | Threat model, trust boundaries, hardening |
 | [docs/architecture.md](docs/architecture.md) | Design: topology, TLS, security, phases |
 | [docs/runbook.md](docs/runbook.md) | GUI/CLI add-remove, certs, PVE cutover |
 | [docs/networking.md](docs/networking.md) | Domains, IPs, firewall worksheet |

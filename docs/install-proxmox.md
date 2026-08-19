@@ -350,11 +350,10 @@ This guide uses **Option A** for the initial install, then optionally switches t
 ```bash
 # inside LXC
 cp /opt/gate/config/traefik.yml /etc/traefik/traefik.yml
-cp /opt/gate/config/dynamic/middlewares.yml /etc/traefik/dynamic/middlewares.yml
-cp /opt/gate/config/dynamic/pve.yml /etc/traefik/dynamic/pve.yml
+cp /opt/gate/config/dynamic/*.yml /etc/traefik/dynamic/
 cp /opt/gate/config/dynamic/apps/*.yml /etc/traefik/dynamic/apps/
 # keep template only in the git tree if you prefer:
-rm -f /etc/traefik/dynamic/apps/_template.yml
+rm -f /etc/traefik/dynamic/apps/_template.yml*
 
 # Make the live Traefik tree and the repo tree the same place (recommended)
 # so the Gate GUI edits are picked up immediately:
@@ -421,7 +420,7 @@ sed -i "s/example.com/${DOMAIN}/g" \
   /opt/gate/config/dynamic/apps/gate.yml
 ```
 
-### 8.4 Point PVE upstream at your node
+### 8.4 Point PVE upstream at your node and trust its certificate
 
 Edit `/opt/gate/config/dynamic/pve.yml`:
 
@@ -435,6 +434,39 @@ The Gate LXC must be able to reach that IP on TCP 8006:
 ```bash
 curl -kI https://192.168.1.2:8006
 ```
+
+Traefik **verifies** the Proxmox backend certificate — TLS verification is
+never disabled. The default PVE certificate (`pve-ssl.pem`) is signed by the
+cluster's own CA (`pve-root-ca.pem`) and includes the node name and IP in its
+SANs, so install that CA on the gate once:
+
+```bash
+# inside the Gate LXC (or use `pct push` from the Proxmox host)
+mkdir -p /etc/traefik/certs
+scp root@192.168.1.2:/etc/pve/pve-root-ca.pem /etc/traefik/certs/pve-root-ca.pem
+chmod 644 /etc/traefik/certs/pve-root-ca.pem
+```
+
+From the Proxmox host instead:
+
+```bash
+pct push 110 /etc/pve/pve-root-ca.pem /etc/traefik/certs/pve-root-ca.pem
+```
+
+Verify the chain before relying on it:
+
+```bash
+curl --cacert /etc/traefik/certs/pve-root-ca.pem -sI https://192.168.1.2:8006 | head -1
+```
+
+Notes:
+
+- If your PVE node already serves a **publicly trusted** certificate (e.g.
+  Let's Encrypt via the node's ACME integration), delete the `rootCAs` block
+  from `pve.yml` — the system trust store is used by default.
+- If the certificate only contains the node's DNS name (custom certs), set
+  `serverName` in the `pve-transport` block and keep the URL as you prefer.
+- After cluster CA renewal (`pvecm updatecerts`), re-copy `pve-root-ca.pem`.
 
 ### 8.5 Temporary whoami backend (for smoke test)
 
@@ -732,14 +764,19 @@ sudo -u gate bash -lc './scripts/add-service.sh gitea http://192.168.1.20:3000'
 - [ ] `:8006` / guest ports not forwarded publicly
 - [ ] VPN or LAN break-glass to Proxmox still works
 - [ ] `admin-allowlist` (or VPN-only DNS) on `gate.` and preferably `pve.`
+- [ ] **Complete Gate GUI setup immediately after starting it** — until the
+      first admin account exists, anyone who can reach the GUI can claim it
+- [ ] `/etc/traefik/certs/pve-root-ca.pem` installed; PVE backend TLS verified
+      (never `insecureSkipVerify`)
 - [ ] Strong Gate GUI password; `config/gui.env` mode `600`, owned by `gate`
 - [ ] `acme.json` mode `600`
-- [ ] `GATE_SESSION_SECRET` set in `/etc/gate-admin.env`
+- [ ] `GATE_SESSION_SECRET` set in `/etc/gate-admin.env` (root:root, `600`)
 - [ ] `GATE_HTTPS_ONLY=1` in the GUI unit (already in shipped unit)
 - [ ] Unattended upgrades on the LXC: `apt install unattended-upgrades`
 - [ ] Proxmox backup job for CT `110` (see §16)
 - [ ] Production ACME only after staging validation
 - [ ] Consider DNS-01 wildcard if you cannot expose `:80` ([Appendix C](#c-dns-01-wildcard-certificates))
+- [ ] Review [security.md](security.md) for the threat model and trusted-proxy notes
 
 ---
 
@@ -751,6 +788,7 @@ sudo -u gate bash -lc './scripts/add-service.sh gitea http://192.168.1.20:3000'
 |---|---|
 | `/opt/gate/` | Git repo, routes, GUI, venv |
 | `/var/lib/traefik/acme.json` | Issued certificates / ACME account |
+| `/etc/traefik/certs/` | PVE root CA used for backend verification |
 | `/etc/gate-admin.env` | Session secret |
 | `/etc/systemd/system/traefik.service` | Unit (also in docs) |
 | `/etc/systemd/system/gate-admin.service` | Unit |
@@ -823,6 +861,16 @@ systemctl restart traefik
 3. Wrong scheme (`http` vs `https`) or port in upstream URL?
 4. For PVE, upstream must be `https://...:8006`
 
+### 500 / TLS error on the pve route only
+
+1. Is `/etc/traefik/certs/pve-root-ca.pem` present and readable?
+2. Verify the chain: `curl --cacert /etc/traefik/certs/pve-root-ca.pem -sI https://<pve-ip>:8006`
+3. Cluster CA renewed (`pvecm updatecerts`)? Re-copy the CA file.
+4. Custom certificate on PVE without the IP in its SANs? Set `serverName` in
+   `pve-transport` (see `config/dynamic/pve.yml`).
+5. Do **not** work around a failing chain with `insecureSkipVerify` — that
+   silently accepts a man-in-the-middle on the hypervisor credential path.
+
 ### Gate GUI not loading
 
 1. `systemctl status gate-admin`
@@ -862,7 +910,7 @@ pct enter 110
 apt update && apt -y full-upgrade
 apt -y install ca-certificates curl git python3 python3-venv ufw jq dnsutils
 useradd --system --home /opt/gate --shell /usr/sbin/nologin gate
-mkdir -p /opt/gate /etc/traefik /var/lib/traefik
+mkdir -p /opt/gate /etc/traefik/certs /var/lib/traefik
 touch /var/lib/traefik/acme.json && chmod 600 /var/lib/traefik/acme.json
 # install traefik binary to /usr/local/bin/traefik  (see §6)
 # install traefik.service                          (see §6)
@@ -870,6 +918,8 @@ git clone https://github.com/reichiClaw/Proxmox-Reverse-Proxy.git /opt/gate
 chown -R gate:gate /opt/gate
 ln -sfn /opt/gate/config/traefik.yml /etc/traefik/traefik.yml
 ln -sfn /opt/gate/config/dynamic /etc/traefik/dynamic
+# trust the PVE cluster CA for verified backend TLS (see §8.4)
+scp root@192.168.1.2:/etc/pve/pve-root-ca.pem /etc/traefik/certs/pve-root-ca.pem
 # edit base.env, traefik.yml email/domain, pve.yml upstream, whoami upstream
 # install gate-admin venv + unit                   (see §9)
 systemctl enable --now traefik gate-admin

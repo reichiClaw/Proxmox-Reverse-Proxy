@@ -82,7 +82,7 @@ Run the Gate web UI (`python -m gui`, published as `https://gate.<domain>`):
 
 ### Manual drop-in (same result)
 
-Copy `config/dynamic/apps/_template.yml`, set subdomain + upstream URL, save as `config/dynamic/apps/<name>.yml`.
+Copy `config/dynamic/apps/_template.yml.example`, set subdomain + upstream URL, save as `config/dynamic/apps/<name>.yml`.
 
 ### Checklist when something is new on the network
 
@@ -126,7 +126,7 @@ Use Let’s Encrypt **staging** until the gate validates end-to-end, then flip t
 |---|---|
 | Typical apps | Edge HTTPS → plain HTTP on services net |
 | Proxmox VE / PBS | Edge HTTPS → HTTPS re-encrypt to `:8006` / `:8007` |
-| Hardened apps | Edge HTTPS → HTTPS with internal CA (later; drop `insecureSkipVerify`) |
+| Hardened apps | Edge HTTPS → HTTPS with internal CA (verified, like PVE) |
 
 Edge certificates stay self-maintained either way; guest apps do not need public certs.
 
@@ -228,8 +228,15 @@ http:
 
   serversTransports:
     pve-transport:
-      insecureSkipVerify: true
+      # Verified against the Proxmox cluster CA — never insecureSkipVerify.
+      rootCAs:
+        - /etc/traefik/certs/pve-root-ca.pem
 ```
+
+Backend TLS to PVE is **verified**: copy `/etc/pve/pve-root-ca.pem` from the
+node to the gate (see the install manual §8.4). The default `pve-ssl.pem`
+certificate carries the node name and IP in its SANs, so verification works
+against the node IP.
 
 Do not DNAT `:8006` publicly after cutover. Keep VPN break-glass.
 
@@ -313,7 +320,7 @@ This repo mirrors that under `config/`.
 │       ├── middlewares.yml
 │       ├── pve.yml
 │       └── apps/
-│           ├── _template.yml
+│           ├── _template.yml.example
 │           ├── gate.yml       # route to the admin GUI
 │           └── whoami.yml
 ├── scripts/

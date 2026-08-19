@@ -23,7 +23,7 @@ if [[ -n "${TRAEFIK_LXC:-}" ]]; then
   done
   for f in "${ROOT}/config/dynamic/apps/"*.yml; do
     base="$(basename "$f")"
-    [[ "$base" == _template.yml ]] && continue
+    [[ "$base" == _template.yml* ]] && continue
     pct push "$TRAEFIK_LXC" "$f" "${REMOTE_DIR}/dynamic/apps/${base}"
   done
   pct exec "$TRAEFIK_LXC" -- chmod 600 /var/lib/traefik/acme.json 2>/dev/null || true
@@ -38,7 +38,7 @@ if [[ -n "${TRAEFIK_HOST:-}" ]]; then
     "${ROOT}/config/traefik.yml" \
     "${TRAEFIK_HOST}:${REMOTE_DIR}/traefik.yml"
   rsync -av --delete \
-    --exclude '_template.yml' \
+    --exclude '_template.yml*' \
     "${ROOT}/config/dynamic/" \
     "${TRAEFIK_HOST}:${REMOTE_DIR}/dynamic/"
   echo "Done. File provider watch should hot-reload routes."

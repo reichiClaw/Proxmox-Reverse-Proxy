@@ -36,4 +36,14 @@ Publish it through Traefik as `gate.<domain>` using `config/dynamic/apps/gate.ym
 | Services CRUD | `config/dynamic/apps/<name>.yml` |
 | PVE upstream edit | `config/dynamic/pve.yml` |
 | Domain / ACME email / staging | `config/base.env`, `config/traefik.yml` |
-| Admin login | `config/gui.env` |
+| Admin login | `config/gui.env` (mode `600`) |
+
+All inputs are validated against strict allowlists before anything is
+written into Traefik config — see [docs/security.md](../docs/security.md).
+
+## Tests
+
+```bash
+pip install -r gui/requirements-dev.txt
+python -m pytest gui/tests
+```

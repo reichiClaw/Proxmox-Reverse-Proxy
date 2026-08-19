@@ -16,7 +16,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="${ROOT}/config/base.env"
 APPS_DIR="${ROOT}/config/dynamic/apps"
-TEMPLATE="${APPS_DIR}/_template.yml"
+# .example suffix keeps Traefik's file provider from loading the template
+# as a live router when dynamic/ is symlinked into /etc/traefik.
+TEMPLATE="${APPS_DIR}/_template.yml.example"
 
 usage() {
   sed -n '2,12p' "$0" | sed 's/^# \?//'

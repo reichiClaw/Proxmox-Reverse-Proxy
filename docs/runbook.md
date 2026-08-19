@@ -45,7 +45,7 @@ Result:
 
 ## Add a service (manual YAML)
 
-1. Copy `config/dynamic/apps/_template.yml` → `apps/<name>.yml`
+1. Copy `config/dynamic/apps/_template.yml.example` → `apps/<name>.yml`
 2. Replace `SERVICE_NAME`, `DOMAIN`, `UPSTREAM_URL`
 3. Sync / wait for hot-reload
 
