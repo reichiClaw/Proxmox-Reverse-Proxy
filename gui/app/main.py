@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
+from . import dns
 from .auth import (
     SESSION_USER_KEY,
     authenticate,
@@ -138,11 +139,44 @@ def _ctx(request: Request, **extra):
         "request": request,
         "user": current_user(request),
         "settings": load_settings(),
+        "dns_config": dns.load_dns_config(),
         "flash": _pop_flash(request),
         "bootstrap": is_bootstrap_required(),
         "csrf_token": _csrf_token(request),
         **extra,
     }
+
+
+_DNS_MESSAGES = {
+    "created": "DNS: CNAME created in Cloudflare.",
+    "updated": "DNS: CNAME updated in Cloudflare.",
+    "exists": "DNS: CNAME already in place.",
+    "conflict": "DNS: a record for this host already exists in Cloudflare and is NOT managed by Gate — left untouched.",
+    "no-zone": "DNS: no Cloudflare zone matches this domain (check the API token's zone scope).",
+    "deleted": "DNS: CNAME removed from Cloudflare.",
+    "not-managed": "DNS: record kept — it is not managed by Gate.",
+}
+
+
+def _dns_ensure(host: str) -> str:
+    """Best-effort DNS convergence; never blocks the route change."""
+    try:
+        status = dns.ensure_cname(host)
+    except dns.DnsError as exc:
+        logger.warning("DNS ensure failed for %s: %s", host, exc)
+        return f" DNS error: {exc}"
+    message = _DNS_MESSAGES.get(status, "")
+    return f" {message}" if message else ""
+
+
+def _dns_delete(host: str) -> str:
+    try:
+        status = dns.delete_cname(host)
+    except dns.DnsError as exc:
+        logger.warning("DNS delete failed for %s: %s", host, exc)
+        return f" DNS error: {exc}"
+    message = _DNS_MESSAGES.get(status, "")
+    return f" {message}" if message else ""
 
 
 def _require_login(request: Request) -> RedirectResponse | None:
@@ -284,6 +318,7 @@ async def services_create(
     request: Request,
     name: Annotated[str, Form()] = "",
     upstream: Annotated[str, Form()] = "",
+    domain: Annotated[str, Form()] = "",
     csrf_token: Annotated[str, Form()] = "",
 ):
     if redir := _require_login(request):
@@ -291,12 +326,13 @@ async def services_create(
     if not _check_csrf(request, csrf_token):
         return _csrf_reject(request, "/services/new")
     try:
-        svc = create_service(name, upstream)
+        svc = create_service(name, upstream, domain=domain or None)
     except ValueError as exc:
         _flash(request, str(exc), "error")
         return RedirectResponse("/services/new", status_code=303)
     logger.info("Service created (name=%s, upstream=%s)", svc.name, svc.upstream)
-    _flash(request, f"Added {svc.public_url} — certificate will be issued automatically.")
+    dns_note = _dns_ensure(svc.host)
+    _flash(request, f"Added {svc.public_url} — certificate will be issued automatically.{dns_note}")
     return RedirectResponse("/services", status_code=303)
 
 
@@ -321,19 +357,29 @@ async def services_update(
     request: Request,
     upstream: Annotated[str, Form()] = "",
     new_name: Annotated[str, Form()] = "",
+    domain: Annotated[str, Form()] = "",
     csrf_token: Annotated[str, Form()] = "",
 ):
     if redir := _require_login(request):
         return redir
     if not _check_csrf(request, csrf_token):
         return _csrf_reject(request, "/services")
+    old = get_service(name)
+    old_host = old.host if old else ""
     try:
-        svc = update_service(name, upstream=upstream, new_name=new_name or None)
+        svc = update_service(
+            name, upstream=upstream, new_name=new_name or None, domain=domain or None
+        )
     except ValueError as exc:
         _flash(request, str(exc), "error")
         return RedirectResponse(f"/services/{name}/edit", status_code=303)
     logger.info("Service updated (name=%s, upstream=%s)", svc.name, svc.upstream)
-    _flash(request, f"Updated {svc.public_url}")
+    dns_note = ""
+    if svc.host != old_host:
+        dns_note = _dns_ensure(svc.host)
+        if old_host:
+            dns_note += _dns_delete(old_host)
+    _flash(request, f"Updated {svc.public_url}.{dns_note}")
     return RedirectResponse("/services", status_code=303)
 
 
@@ -347,13 +393,16 @@ async def services_delete(
         return redir
     if not _check_csrf(request, csrf_token):
         return _csrf_reject(request, "/services")
+    svc = get_service(name)
+    host = svc.host if svc else ""
     try:
         delete_service(name)
     except ValueError as exc:
         _flash(request, str(exc), "error")
         return RedirectResponse("/services", status_code=303)
     logger.info("Service deleted (name=%s)", name)
-    _flash(request, f"Removed service '{name}'.")
+    dns_note = _dns_delete(host) if host else ""
+    _flash(request, f"Removed service '{name}'.{dns_note}")
     return RedirectResponse("/services", status_code=303)
 
 
@@ -368,8 +417,12 @@ async def settings_get(request: Request):
 async def settings_post(
     request: Request,
     domain: Annotated[str, Form()] = "",
+    extra_domains: Annotated[str, Form()] = "",
     acme_email: Annotated[str, Form()] = "",
     acme_staging: Annotated[str, Form()] = "",
+    cf_api_token: Annotated[str, Form()] = "",
+    cf_target: Annotated[str, Form()] = "",
+    cf_proxied: Annotated[str, Form()] = "",
     csrf_token: Annotated[str, Form()] = "",
 ):
     if redir := _require_login(request):
@@ -378,6 +431,7 @@ async def settings_post(
         return _csrf_reject(request, "/settings")
     settings = load_settings()
     settings.domain = domain.strip().lower()
+    settings.extra_domains = [d.strip().lower() for d in extra_domains.split(",") if d.strip()]
     settings.acme_email = acme_email.strip()
     settings.acme_staging = acme_staging == "on"
     try:
@@ -385,8 +439,32 @@ async def settings_post(
     except ValueError as exc:
         _flash(request, str(exc), "error")
         return RedirectResponse("/settings", status_code=303)
+
+    # Cloudflare DNS automation — blank token keeps the stored one.
+    dns_config = dns.load_dns_config()
+    dns_config.target = cf_target.strip().lower().rstrip(".")
+    dns_config.proxied = cf_proxied == "on"
+    if cf_api_token.strip():
+        dns_config.api_token = cf_api_token.strip()
+    dns.save_dns_config(dns_config)
+
+    dns_note = ""
+    if dns_config.enabled:
+        try:
+            zones = dns.list_zones(dns_config.api_token)
+            matched = [d for d in settings.allowed_domains if dns._find_zone(f"x.{d}", zones)]
+            missing = [d for d in settings.allowed_domains if d not in matched]
+            dns_note = f" Cloudflare OK — zones visible: {', '.join(sorted(zones)) or 'none'}."
+            if missing:
+                dns_note += f" WARNING: no zone covers: {', '.join(missing)}."
+        except dns.DnsError as exc:
+            dns_note = f" Cloudflare token verification failed: {exc}"
     logger.info(
-        "Settings saved (domain=%s, staging=%s)", settings.domain, settings.acme_staging
+        "Settings saved (domain=%s, extra=%s, staging=%s, dns=%s)",
+        settings.domain,
+        ",".join(settings.extra_domains),
+        settings.acme_staging,
+        dns_config.enabled,
     )
-    _flash(request, "Settings saved. Hostnames were rewritten if the domain changed.")
+    _flash(request, f"Settings saved.{dns_note}")
     return RedirectResponse("/settings", status_code=303)

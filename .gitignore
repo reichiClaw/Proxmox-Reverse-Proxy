@@ -1,6 +1,7 @@
 
 config/base.env
 config/gui.env
+config/cloudflare.env
 .venv/
 __pycache__/
 *.pyc

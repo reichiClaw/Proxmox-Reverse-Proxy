@@ -35,8 +35,12 @@ Publish it through Traefik as `gate.<domain>` using `config/dynamic/apps/gate.ym
 |---|---|
 | Services CRUD | `config/dynamic/apps/<name>.yml` |
 | PVE upstream edit | `config/dynamic/pve.yml` |
-| Domain / ACME email / staging | `config/base.env`, `config/traefik.yml` |
+| Domains / ACME email / staging | `config/base.env`, `config/traefik.yml` |
+| Cloudflare DNS automation | `config/cloudflare.env` (mode `600`) |
 | Admin login | `config/gui.env` (mode `600`) |
+
+DNS records for new hosts are created automatically when Cloudflare is
+configured — see the README section "Cloudflare DNS integration".
 
 All inputs are validated against strict allowlists before anything is
 written into Traefik config — see [docs/security.md](../docs/security.md).

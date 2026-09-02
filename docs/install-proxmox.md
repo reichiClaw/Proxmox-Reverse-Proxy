@@ -194,6 +194,9 @@ At your DNS provider, create:
 Notes:
 
 - With a **wildcard**, every new service works without another DNS change.
+- **Domain on Cloudflare?** Instead of a wildcard you can let Gate create a
+  CNAME per host automatically (multi-domain capable) — see the README
+  section "Cloudflare DNS integration".
 - If the Gate is behind NAT, public DNS must point at the **WAN IP**; the router forwards 80/443 to the LXC.
 - For split DNS (LAN resolves to private IP, internet to WAN IP), configure both views the same way relative to how clients reach the gate.
 

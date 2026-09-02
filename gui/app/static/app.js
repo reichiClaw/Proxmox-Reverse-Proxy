@@ -11,13 +11,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const input = document.querySelector("input[data-host-preview]");
   const preview = document.getElementById("host-preview");
+  const domainSelect = document.getElementById("domain-select");
   if (input && preview) {
-    const domain = input.dataset.hostPreview;
     const sync = () => {
       const value = (input.value || "name").toLowerCase();
+      const domain = domainSelect ? domainSelect.value : input.dataset.hostPreview;
       preview.textContent = value + "." + domain;
     };
     input.addEventListener("input", sync);
+    if (domainSelect) domainSelect.addEventListener("change", sync);
     sync();
   }
 });

@@ -20,10 +20,26 @@
     {% if mode == 'create' %}
     <input name="name" placeholder="gitea" pattern="[a-z0-9]([-a-z0-9]*[a-z0-9])?" data-host-preview="{{ settings.domain }}" required autofocus />
     {% else %}
-    <input name="new_name" value="{{ service.name }}" pattern="[a-z0-9]([-a-z0-9]*[a-z0-9])?" data-host-preview="{{ settings.domain }}" {% if service.source == 'system' %}readonly{% endif %} required autofocus />
+    <input name="new_name" value="{{ service.name }}" pattern="[a-z0-9]([-a-z0-9]*[a-z0-9])?" data-host-preview="{{ service.domain or settings.domain }}" {% if service.source == 'system' %}readonly{% endif %} required autofocus />
     {% endif %}
     <small>Public host: <code id="host-preview">{% if service %}{{ service.host }}{% else %}name.{{ settings.domain }}{% endif %}</code></small>
   </label>
+
+  {% if service is none or service.source != 'system' %}
+  <label>
+    <span>Domain</span>
+    <select name="domain" id="domain-select">
+      {% set current = service.domain if service else settings.domain %}
+      {% for d in settings.allowed_domains %}
+      <option value="{{ d }}" {% if d == current %}selected{% endif %}>{{ d }}</option>
+      {% endfor %}
+      {% if service and service.domain and service.domain not in settings.allowed_domains %}
+      <option value="{{ service.domain }}" selected>{{ service.domain }} (no longer configured)</option>
+      {% endif %}
+    </select>
+    <small>Add more domains under Settings. With Cloudflare configured, the CNAME is created automatically.</small>
+  </label>
+  {% endif %}
 
   <label>
     <span>Upstream URL</span>

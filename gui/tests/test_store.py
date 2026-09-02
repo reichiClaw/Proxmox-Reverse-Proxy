@@ -131,6 +131,50 @@ class TestSecrets:
             )
 
 
+class TestMultiDomain:
+    def _add_extra(self, extra: str):
+        settings = store.load_settings()
+        settings.extra_domains = [extra]
+        store.save_settings(settings)
+
+    def test_create_on_extra_domain(self):
+        self._add_extra("second.example.org")
+        svc = store.create_service("app", "http://10.0.0.5:80", domain="second.example.org")
+        assert svc.host == "app.second.example.org"
+        assert svc.domain == "second.example.org"
+
+    def test_create_rejects_unconfigured_domain(self):
+        with pytest.raises(ValueError):
+            store.create_service("app", "http://10.0.0.5:80", domain="evil.example.net")
+
+    def test_edit_preserves_extra_domain(self):
+        self._add_extra("second.example.org")
+        store.create_service("app", "http://10.0.0.5:80", domain="second.example.org")
+        svc = store.update_service("app", upstream="http://10.0.0.5:81")
+        assert svc.host == "app.second.example.org"
+        assert 'url: "http://10.0.0.5:81"' in (APPS_DIR / "app.yml").read_text()
+
+    def test_edit_can_move_domain(self):
+        self._add_extra("second.example.org")
+        store.create_service("app", "http://10.0.0.5:80")
+        svc = store.update_service(
+            "app", upstream="http://10.0.0.5:80", domain="second.example.org"
+        )
+        assert svc.host == "app.second.example.org"
+
+    def test_extra_domains_roundtrip_and_validation(self):
+        settings = store.load_settings()
+        settings.extra_domains = ["Second.Example.ORG", "third.example.net"]
+        store.save_settings(settings)
+        loaded = store.load_settings()
+        assert loaded.extra_domains == ["second.example.org", "third.example.net"]
+        assert loaded.allowed_domains[0] == loaded.domain
+
+        settings.extra_domains = ["bad`domain.com"]
+        with pytest.raises(ValueError):
+            store.save_settings(settings)
+
+
 class TestSettings:
     def test_save_settings_rewrites_hosts(self):
         store.create_service("gitea", "http://10.0.0.5:3000")

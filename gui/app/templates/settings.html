@@ -12,7 +12,13 @@
   <label>
     <span>Base domain</span>
     <input name="domain" value="{{ settings.domain }}" required />
-    <small>Services publish as <code>&lt;name&gt;.{{ settings.domain }}</code>. Prefer a wildcard DNS record pointing at Traefik.</small>
+    <small>Default domain for new services: <code>&lt;name&gt;.{{ settings.domain }}</code>.</small>
+  </label>
+
+  <label>
+    <span>Additional domains</span>
+    <input name="extra_domains" value="{{ settings.extra_domains|join(', ') }}" placeholder="second.example, third.example" />
+    <small>Comma-separated. Each becomes selectable when adding a service. DNS must point at this gate (wildcard record or Cloudflare automation below).</small>
   </label>
 
   <label>
@@ -25,6 +31,34 @@
     <input type="checkbox" name="acme_staging" {% if settings.acme_staging %}checked{% endif %} />
     <span>Use Let’s Encrypt staging CA</span>
     <small>Keep on until the gate works end-to-end, then turn off for trusted browsers.</small>
+  </label>
+
+  <h2 class="form-section">Cloudflare DNS automation</h2>
+  <p class="lede">
+    {% if dns_config.enabled %}
+    Enabled — new hosts get a CNAME to <code>{{ dns_config.target }}</code> automatically.
+    {% else %}
+    Optional: create a CNAME record automatically for every new host. Needs an API token with <em>Zone → DNS → Edit</em> on your zones and one existing A/AAAA (or DDNS) record as the target.
+    {% endif %}
+  </p>
+
+  <label>
+    <span>API token</span>
+    <input name="cf_api_token" type="password" autocomplete="off"
+           placeholder="{% if dns_config.api_token %}configured — leave blank to keep{% else %}paste Cloudflare API token{% endif %}" />
+    <small>Stored in <code>config/cloudflare.env</code> (mode 600, never committed). Scope it to only the zones you use here.</small>
+  </label>
+
+  <label>
+    <span>CNAME target</span>
+    <input name="cf_target" value="{{ dns_config.target }}" placeholder="gate.example.com or your-ddns.example.net" />
+    <small>The DNS name that already resolves to this gate. All service records point here.</small>
+  </label>
+
+  <label class="check">
+    <input type="checkbox" name="cf_proxied" {% if dns_config.proxied %}checked{% endif %} />
+    <span>Proxy through Cloudflare (orange cloud)</span>
+    <small>Leave off for DNS-only (recommended): HTTP-01 certificates and Proxmox consoles work unchanged. See README before enabling.</small>
   </label>
 
   <div class="form-actions">

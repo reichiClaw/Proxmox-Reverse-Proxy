@@ -34,9 +34,10 @@ def _reset_config() -> None:
     (cfg / "base.env").write_text(
         f"DOMAIN={TEST_DOMAIN}\nACME_EMAIL=admin@{TEST_DOMAIN}\n", encoding="utf-8"
     )
-    gui_env = cfg / "gui.env"
-    if gui_env.exists():
-        gui_env.unlink()
+    for leftover in ("gui.env", "cloudflare.env"):
+        f = cfg / leftover
+        if f.exists():
+            f.unlink()
 
 
 @pytest.fixture(autouse=True)

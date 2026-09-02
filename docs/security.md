@@ -93,6 +93,7 @@ gate can reach (that is its job). Keep the services network segmented so
 | File | Mode | Contents |
 |---|---|---|
 | `/opt/gate/config/gui.env` | `600` | admin username + bcrypt hash |
+| `/opt/gate/config/cloudflare.env` | `600` | Cloudflare API token (scope it to only the zones Gate manages: `Zone→Zone→Read`, `Zone→DNS→Edit`) |
 | `/etc/gate-admin.env` | `600` | `GATE_SESSION_SECRET` |
 | `/var/lib/traefik/acme.json` | `600` | ACME account + private keys |
 | `/etc/traefik/certs/pve-root-ca.pem` | `644` | public CA cert (not secret) |

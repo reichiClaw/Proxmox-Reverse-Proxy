@@ -52,15 +52,29 @@ class Service:
     def public_url(self) -> str:
         return f"https://{self.host}" if self.host else ""
 
+    @property
+    def domain(self) -> str:
+        """Domain part of the host (host minus the first label)."""
+        return self.host.split(".", 1)[1] if "." in self.host else ""
+
 
 @dataclass
 class Settings:
     domain: str = "example.com"
+    extra_domains: list[str] = field(default_factory=list)
     acme_email: str = "admin@example.com"
     acme_staging: bool = True
     admin_user: str = "admin"
     # password hash stored in gui.env; empty means not configured yet
     admin_password_hash: str = ""
+
+    @property
+    def allowed_domains(self) -> list[str]:
+        seen: list[str] = [self.domain]
+        for domain in self.extra_domains:
+            if domain and domain not in seen:
+                seen.append(domain)
+        return seen
 
 
 def _read_env_file(path: Path) -> dict[str, str]:
@@ -119,8 +133,14 @@ def load_settings() -> Settings:
         email = acme.get("email") or email
         ca = acme.get("caServer") or STAGING_CA
         staging = "staging" in str(ca)
+    extra = [
+        d.strip().lower()
+        for d in (base.get("EXTRA_DOMAINS") or "").split(",")
+        if d.strip()
+    ]
     return Settings(
         domain=base.get("DOMAIN") or gui.get("DOMAIN") or "example.com",
+        extra_domains=extra,
         acme_email=email,
         acme_staging=staging,
         admin_user=gui.get("ADMIN_USER") or "admin",
@@ -155,6 +175,9 @@ def validate_email(email: str) -> str:
 
 def save_settings(settings: Settings, *, rewrite_hosts: bool = True) -> None:
     settings.domain = validate_domain(settings.domain)
+    settings.extra_domains = [
+        validate_domain(d) for d in settings.extra_domains if d.strip()
+    ]
     settings.acme_email = validate_email(settings.acme_email)
 
     old = load_settings()
@@ -162,6 +185,7 @@ def save_settings(settings: Settings, *, rewrite_hosts: bool = True) -> None:
         BASE_ENV,
         {
             "DOMAIN": settings.domain,
+            "EXTRA_DOMAINS": ",".join(settings.extra_domains),
             "ACME_EMAIL": settings.acme_email,
         },
         "# Managed by Gate admin GUI / scripts.",
@@ -338,17 +362,32 @@ def _render_app_yaml(name: str, domain: str, upstream: str, middlewares: list[st
     )
 
 
-def create_service(name: str, upstream: str) -> Service:
+def _resolve_domain(settings: Settings, domain: str | None, current: str = "") -> str:
+    """Pick and validate the domain for a service host.
+
+    ``current`` (a service's existing domain) stays valid even if it was
+    removed from the configured list, so edits never break existing routes.
+    """
+    chosen = validate_domain(domain) if domain else (current or settings.domain)
+    allowed = settings.allowed_domains
+    if chosen not in allowed and chosen != current:
+        raise ValueError(
+            f"Domain '{chosen}' is not configured. Allowed: {', '.join(allowed)}"
+        )
+    return chosen
+
+
+def create_service(name: str, upstream: str, domain: str | None = None) -> Service:
     name = validate_name(name)
     upstream = validate_upstream(upstream)
     settings = load_settings()
-    domain = validate_domain(settings.domain)
+    chosen_domain = _resolve_domain(settings, domain)
     APPS_DIR.mkdir(parents=True, exist_ok=True)
     path = APPS_DIR / f"{name}.yml"
     if path.exists():
         raise ValueError(f"Service '{name}' already exists.")
     path.write_text(
-        _render_app_yaml(name, domain, upstream),
+        _render_app_yaml(name, chosen_domain, upstream),
         encoding="utf-8",
     )
     svc = get_service(name)
@@ -356,7 +395,13 @@ def create_service(name: str, upstream: str) -> Service:
     return svc
 
 
-def update_service(name: str, *, upstream: str | None = None, new_name: str | None = None) -> Service:
+def update_service(
+    name: str,
+    *,
+    upstream: str | None = None,
+    new_name: str | None = None,
+    domain: str | None = None,
+) -> Service:
     svc = get_service(name)
     if svc is None:
         raise ValueError(f"Service '{name}' not found.")
@@ -365,14 +410,14 @@ def update_service(name: str, *, upstream: str | None = None, new_name: str | No
 
     upstream = validate_upstream(upstream if upstream is not None else svc.upstream)
     settings = load_settings()
-    domain = validate_domain(settings.domain)
+    chosen_domain = _resolve_domain(settings, domain, current=svc.domain)
     target_name = validate_name(new_name) if new_name and new_name != name else name
     new_path = APPS_DIR / f"{target_name}.yml"
 
     if target_name != name and new_path.exists():
         raise ValueError(f"Service '{target_name}' already exists.")
 
-    content = _render_app_yaml(target_name, domain, upstream, svc.middlewares)
+    content = _render_app_yaml(target_name, chosen_domain, upstream, svc.middlewares)
     new_path.write_text(content, encoding="utf-8")
     if target_name != name and svc.path and svc.path.exists():
         svc.path.unlink()

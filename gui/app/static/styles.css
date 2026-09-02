@@ -253,6 +253,28 @@ input:focus {
   margin-top: 0.25rem;
 }
 
+.form-section {
+  margin: 0.75rem 0 -0.35rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--line);
+  font-size: 1.05rem;
+}
+
+select {
+  width: 100%;
+  border: 1px solid var(--line);
+  background: var(--surface-solid);
+  border-radius: 12px;
+  padding: 0.8rem 0.9rem;
+  font: inherit;
+  color: inherit;
+}
+
+select:focus {
+  outline: 2px solid rgba(15, 110, 98, 0.35);
+  border-color: var(--accent);
+}
+
 .btn {
   appearance: none;
   border: 1px solid transparent;

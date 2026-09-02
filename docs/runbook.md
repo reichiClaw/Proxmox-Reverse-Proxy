@@ -41,7 +41,10 @@ Result:
 - Route: `https://<name>.<DOMAIN>`
 - Certificate: requested and renewed by Traefik ACME automatically
 - No new firewall rule if the guest is already on the services network
-- No new DNS record if wildcard `*.<DOMAIN>` already points at Traefik
+- DNS: covered by a wildcard `*.<DOMAIN>` record, **or** created
+  automatically as a CNAME when Cloudflare automation is configured
+  (README → "Cloudflare DNS integration"); CLI adds can run
+  `python -m gui.app.dns sync` afterwards
 
 ## Add a service (manual YAML)
 
