@@ -180,7 +180,8 @@ inside_phase() {
 
   if [[ -d /opt/gate/.git ]]; then
     log "Updating existing /opt/gate checkout"
-    git -C /opt/gate pull --ff-only || warn "git pull failed — keeping current checkout"
+    # Repo is owned by gate; root hits "dubious ownership" without this.
+    as_gate git -C /opt/gate pull --ff-only || warn "git pull failed — keeping current checkout"
   else
     log "Cloning ${REPO_URL} to /opt/gate"
     git clone --depth 1 "$REPO_URL" /opt/gate

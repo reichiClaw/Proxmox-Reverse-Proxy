@@ -885,13 +885,28 @@ Read Traefik migration notes before major jumps (v2 → v3, etc.). This repo tar
 
 ### Gate GUI / repo
 
+`/opt/gate` is owned by `gate`. Pull as that user (root gets `fatal: detected dubious ownership`).
+
+Inside the CT:
+
 ```bash
 cd /opt/gate
-sudo -u gate git pull
-sudo -u gate /opt/gate/.venv/bin/pip install -r gui/requirements.txt
+runuser -u gate -- git pull origin main
+runuser -u gate -- /opt/gate/.venv/bin/pip install -r gui/requirements.txt
 systemctl restart gate-admin
 # Traefik hot-reloads YAML; restart Traefik only if traefik.yml static bits changed
 systemctl restart traefik
+```
+
+From the Proxmox host:
+
+```bash
+pct exec 103 -- bash -lc '
+  runuser -u gate -- git -C /opt/gate pull origin main
+  runuser -u gate -- /opt/gate/.venv/bin/pip install -r /opt/gate/gui/requirements.txt
+  sed -i "/admin-allowlist/d" /opt/gate/config/dynamic/apps/gate.yml
+  systemctl restart gate-admin
+'
 ```
 
 ---
