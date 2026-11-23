@@ -965,15 +965,33 @@ scanners hitting the bare IP from getting a TLS response.
 
 ### `https://gate.<domain>` shows / downloads “Forbidden”
 
-That is Traefik **403** from `admin-allowlist` (optional middleware). Current
-defaults leave it **off** for `gate.` so the UI is reachable from the
-internet with password auth. If you enabled the allowlist and need public
-access again:
+That is Traefik **403** from `admin-allowlist`. Browsers often download the
+9-byte body as a file. Current defaults leave the allowlist **off** for
+`gate.`; if your live CT still has it enabled (or Traefik reads a *copy*
+under `/etc/traefik/dynamic` instead of the repo symlink), run:
 
 ```bash
-pct exec 103 -- sed -i '/admin-allowlist/d' /opt/gate/config/dynamic/apps/gate.yml
-# or add your VPN/LAN CIDRs under admin-allowlist.sourceRange in middlewares.yml
+pct exec 103 -- bash -lc '
+  runuser -u gate -- git -C /opt/gate pull origin main
+  bash /opt/gate/scripts/make-gate-public.sh
+'
 ```
+
+Or one-shot without the script:
+
+```bash
+pct exec 103 -- bash -lc '
+  for f in /opt/gate/config/dynamic/apps/gate.yml /etc/traefik/dynamic/apps/gate.yml; do
+    [ -f "$f" ] || continue
+    sed -i -E "s/^([[:space:]]*)-[[:space:]]+admin-allowlist[[:space:]]*$/\1# - admin-allowlist/" "$f"
+    echo "== $f =="; grep -n admin-allowlist "$f" || echo "(no allowlist lines)"
+  done
+  systemctl restart gate-admin traefik
+  curl -skI -H "Host: gate.rcserver.io" https://127.0.0.1/ | head -15
+'
+```
+
+Expect `HTTP/2 200` or `302` to `/login` or `/setup` — not `403`.
 
 ### Proxmox console (noVNC) fails through proxy
 
