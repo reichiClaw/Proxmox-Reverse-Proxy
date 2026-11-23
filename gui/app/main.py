@@ -613,5 +613,12 @@ async def settings_post(
         settings.acme_staging,
         dns_config.enabled,
     )
-    _flash(request, f"Settings saved.{dns_note}")
+    acme_note = ""
+    if not settings.acme_staging:
+        acme_note = (
+            " Staging off in traefik.yml — run "
+            "`bash /opt/gate/scripts/switch-acme-prod.sh` in the CT "
+            "to clear acme.json and restart Traefik, or browsers keep staging certs."
+        )
+    _flash(request, f"Settings saved.{dns_note}{acme_note}")
     return RedirectResponse("/settings", status_code=303)

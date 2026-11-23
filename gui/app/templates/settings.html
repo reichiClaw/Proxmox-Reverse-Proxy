@@ -30,7 +30,12 @@
   <label class="check">
     <input type="checkbox" name="acme_staging" {% if settings.acme_staging %}checked{% endif %} />
     <span>Use Let’s Encrypt staging CA</span>
-    <small>Keep on until the gate works end-to-end, then turn off for trusted browsers.</small>
+    <small>
+      Keep on until whoami/gate work end-to-end, then turn off.
+      Saving only edits <code>traefik.yml</code> — after leaving staging, run
+      <code>bash /opt/gate/scripts/switch-acme-prod.sh</code> inside the CT
+      (clears <code>acme.json</code> and restarts Traefik) or browsers keep the old staging certs.
+    </small>
   </label>
 
   <h2 class="form-section">Cloudflare DNS automation</h2>

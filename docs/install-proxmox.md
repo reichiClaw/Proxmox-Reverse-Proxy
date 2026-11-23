@@ -751,37 +751,32 @@ When satisfied:
 
 Only after staging smoke tests succeed (whoami + gate + pve as needed).
 
-### Via Gate GUI
+Unchecking staging in **Settings** only rewrites `traefik.yml`. Traefik will
+keep serving the **old staging certificates** from `acme.json` until that
+file is cleared and Traefik is restarted (static ACME config is not
+hot-reloaded).
 
-1. **Settings**
-2. Uncheck **Use Let’s Encrypt staging CA**
-3. Save
-
-### Via file
-
-In `/opt/gate/config/traefik.yml`:
-
-```yaml
-caServer: https://acme-v02.api.letsencrypt.org/directory
-```
-
-Restart Traefik (ACME resolver changes are static config):
+One-shot (preferred):
 
 ```bash
-systemctl restart traefik.service
+pct exec 103 -- bash -lc '
+  runuser -u gate -- git -C /opt/gate pull --ff-only origin main || true
+  bash /opt/gate/scripts/switch-acme-prod.sh
+'
 ```
 
-Force fresh certs if browsers still see staging:
+Or manually: set `caServer` to
+`https://acme-v02.api.letsencrypt.org/directory` in `traefik.yml`, then:
 
 ```bash
 systemctl stop traefik
 mv /var/lib/traefik/acme.json /var/lib/traefik/acme.json.staging.bak
-touch /var/lib/traefik/acme.json
-chmod 600 /var/lib/traefik/acme.json
+touch /var/lib/traefik/acme.json && chmod 600 /var/lib/traefik/acme.json
 systemctl start traefik
 ```
 
-Then reload `https://whoami.lab.example.com` — the certificate should be trusted.
+Hit `https://whoami.<domain>` once to trigger issuance — the padlock should
+be trusted.
 
 > Rate limits: production Let’s Encrypt has weekly limits. Do not flap production issuance while testing; use staging for experiments.
 
