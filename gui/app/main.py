@@ -14,11 +14,15 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from . import dns
 from .auth import (
+    SESSION_PENDING_2FA,
+    SESSION_PENDING_TOTP_SECRET,
     SESSION_USER_KEY,
     authenticate,
     bootstrap_admin,
     is_bootstrap_required,
     login_throttle,
+    totp_enabled,
+    verify_totp,
 )
 from .store import (
     create_service,
@@ -27,8 +31,10 @@ from .store import (
     list_services,
     load_settings,
     save_settings,
+    save_totp_secret,
     update_service,
 )
+from . import totp as totp_mod
 
 logger = logging.getLogger("gate")
 
@@ -182,6 +188,8 @@ def _dns_delete(host: str) -> str:
 def _require_login(request: Request) -> RedirectResponse | None:
     if is_bootstrap_required():
         return RedirectResponse("/setup", status_code=303)
+    if request.session.get(SESSION_PENDING_2FA) and not current_user(request):
+        return RedirectResponse("/login/totp", status_code=303)
     if not current_user(request):
         return RedirectResponse(f"/login?next={request.url.path}", status_code=303)
     return None
@@ -196,6 +204,8 @@ async def healthz():
 async def home(request: Request):
     if is_bootstrap_required():
         return RedirectResponse("/setup", status_code=303)
+    if request.session.get(SESSION_PENDING_2FA) and not current_user(request):
+        return RedirectResponse("/login/totp", status_code=303)
     if not current_user(request):
         return RedirectResponse("/login", status_code=303)
     return RedirectResponse("/services", status_code=303)
@@ -269,18 +279,71 @@ async def login_post(
         return RedirectResponse("/login", status_code=303)
 
     if authenticate(username, password):
-        login_throttle.record_success(*throttle_keys)
         # Rotate the session on privilege change to prevent fixation.
+        dest = _safe_next(next)
         request.session.clear()
-        request.session[SESSION_USER_KEY] = username
         _csrf_token(request)
+        if totp_enabled():
+            request.session[SESSION_PENDING_2FA] = username
+            request.session["login_next"] = dest
+            logger.info("Password ok, TOTP required (user=%s, ip=%s)", username, ip)
+            return RedirectResponse("/login/totp", status_code=303)
+        login_throttle.record_success(*throttle_keys)
+        request.session[SESSION_USER_KEY] = username
         logger.info("Login succeeded (user=%s, ip=%s)", username, ip)
-        return RedirectResponse(_safe_next(next), status_code=303)
+        return RedirectResponse(dest, status_code=303)
 
     login_throttle.record_failure(*throttle_keys)
     logger.warning("Login failed (ip=%s)", ip)
     _flash(request, "Invalid username or password.", "error")
     return RedirectResponse("/login", status_code=303)
+
+
+@app.get("/login/totp", response_class=HTMLResponse)
+async def login_totp_get(request: Request):
+    if not request.session.get(SESSION_PENDING_2FA):
+        return RedirectResponse("/login", status_code=303)
+    if current_user(request):
+        return RedirectResponse("/services", status_code=303)
+    return TEMPLATES.TemplateResponse(
+        request,
+        "login_totp.html",
+        _ctx(request, title="Authenticator code"),
+    )
+
+
+@app.post("/login/totp")
+async def login_totp_post(
+    request: Request,
+    code: Annotated[str, Form()] = "",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    if not _check_csrf(request, csrf_token):
+        return _csrf_reject(request, "/login/totp")
+    pending = request.session.get(SESSION_PENDING_2FA)
+    if not pending:
+        return RedirectResponse("/login", status_code=303)
+
+    ip = _client_ip(request)
+    throttle_keys = (f"user:{str(pending).lower()}", f"ip:{ip}", f"totp:{ip}")
+    if login_throttle.is_locked(*throttle_keys):
+        request.session.pop(SESSION_PENDING_2FA, None)
+        _flash(request, "Too many failed attempts. Try again later.", "error")
+        return RedirectResponse("/login", status_code=303)
+
+    if verify_totp(code):
+        login_throttle.record_success(*throttle_keys)
+        dest = _safe_next(request.session.pop("login_next", "/services"))
+        request.session.clear()
+        request.session[SESSION_USER_KEY] = pending
+        _csrf_token(request)
+        logger.info("Login succeeded with TOTP (user=%s, ip=%s)", pending, ip)
+        return RedirectResponse(dest, status_code=303)
+
+    login_throttle.record_failure(*throttle_keys)
+    logger.warning("TOTP failed (ip=%s)", ip)
+    _flash(request, "Invalid authenticator code.", "error")
+    return RedirectResponse("/login/totp", status_code=303)
 
 
 @app.post("/logout")
@@ -410,7 +473,91 @@ async def services_delete(
 async def settings_get(request: Request):
     if redir := _require_login(request):
         return redir
-    return TEMPLATES.TemplateResponse(request, "settings.html", _ctx(request, title="Settings"))
+    pending_secret = request.session.get(SESSION_PENDING_TOTP_SECRET)
+    totp_setup = None
+    if pending_secret:
+        user = current_user(request) or "admin"
+        totp_setup = {
+            "secret": pending_secret,
+            "manual_key": totp_mod.manual_entry_key(pending_secret),
+            "qr_uri": totp_mod.qr_svg_data_uri(pending_secret, user),
+            "otpauth": totp_mod.provisioning_uri(pending_secret, user),
+        }
+    return TEMPLATES.TemplateResponse(
+        request,
+        "settings.html",
+        _ctx(request, title="Settings", totp_setup=totp_setup),
+    )
+
+
+@app.post("/settings/totp/start")
+async def totp_start(request: Request, csrf_token: Annotated[str, Form()] = ""):
+    if redir := _require_login(request):
+        return redir
+    if not _check_csrf(request, csrf_token):
+        return _csrf_reject(request, "/settings")
+    if totp_enabled():
+        _flash(request, "Authenticator is already enabled.", "error")
+        return RedirectResponse("/settings", status_code=303)
+    request.session[SESSION_PENDING_TOTP_SECRET] = totp_mod.generate_secret()
+    return RedirectResponse("/settings", status_code=303)
+
+
+@app.post("/settings/totp/confirm")
+async def totp_confirm(
+    request: Request,
+    code: Annotated[str, Form()] = "",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    if redir := _require_login(request):
+        return redir
+    if not _check_csrf(request, csrf_token):
+        return _csrf_reject(request, "/settings")
+    pending = request.session.get(SESSION_PENDING_TOTP_SECRET)
+    if not pending:
+        _flash(request, "No authenticator setup in progress.", "error")
+        return RedirectResponse("/settings", status_code=303)
+    ok, _ = totp_mod.verify_code(pending, code)
+    if not ok:
+        _flash(request, "Invalid code — check the time on your phone and try again.", "error")
+        return RedirectResponse("/settings", status_code=303)
+    save_totp_secret(pending)
+    request.session.pop(SESSION_PENDING_TOTP_SECRET, None)
+    logger.info("TOTP enabled for admin")
+    _flash(request, "Authenticator app enabled. It will be required at next login.")
+    return RedirectResponse("/settings", status_code=303)
+
+
+@app.post("/settings/totp/cancel")
+async def totp_cancel(request: Request, csrf_token: Annotated[str, Form()] = ""):
+    if redir := _require_login(request):
+        return redir
+    if not _check_csrf(request, csrf_token):
+        return _csrf_reject(request, "/settings")
+    request.session.pop(SESSION_PENDING_TOTP_SECRET, None)
+    return RedirectResponse("/settings", status_code=303)
+
+
+@app.post("/settings/totp/disable")
+async def totp_disable(
+    request: Request,
+    password: Annotated[str, Form()] = "",
+    code: Annotated[str, Form()] = "",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    if redir := _require_login(request):
+        return redir
+    if not _check_csrf(request, csrf_token):
+        return _csrf_reject(request, "/settings")
+    user = current_user(request) or ""
+    if not authenticate(user, password) or not verify_totp(code):
+        _flash(request, "Password or authenticator code incorrect.", "error")
+        return RedirectResponse("/settings", status_code=303)
+    save_totp_secret("")
+    request.session.pop(SESSION_PENDING_TOTP_SECRET, None)
+    logger.info("TOTP disabled for admin")
+    _flash(request, "Authenticator app disabled.")
+    return RedirectResponse("/settings", status_code=303)
 
 
 @app.post("/settings")

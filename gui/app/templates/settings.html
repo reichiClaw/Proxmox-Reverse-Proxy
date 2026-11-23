@@ -66,6 +66,66 @@
   </div>
 </form>
 
+<section class="page-head" style="margin-top: 2rem;">
+  <div>
+    <h2>Authenticator app (TOTP)</h2>
+    <p class="lede">
+      {% if settings.totp_enabled %}
+      Enabled — a 6-digit code from your authenticator app is required after the password at login.
+      {% else %}
+      Optional second factor for internet-facing Gate login (Google Authenticator, Aegis, 1Password, etc.).
+      {% endif %}
+    </p>
+  </div>
+</section>
+
+{% if settings.totp_enabled %}
+<form method="post" action="/settings/totp/disable" class="form-grid">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+  <label>
+    <span>Password</span>
+    <input type="password" name="password" autocomplete="current-password" required />
+  </label>
+  <label>
+    <span>Current authenticator code</span>
+    <input name="code" inputmode="numeric" pattern="[0-9 ]{6,8}" autocomplete="one-time-code" required />
+  </label>
+  <div class="form-actions">
+    <button class="btn danger ghost" type="submit">Disable authenticator</button>
+  </div>
+</form>
+{% elif totp_setup %}
+<form method="post" action="/settings/totp/confirm" class="form-grid">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+  <p class="lede">Scan this QR code with your authenticator app, then enter a code to confirm.</p>
+  <img class="totp-qr" src="{{ totp_setup.qr_uri }}" alt="TOTP QR code" width="200" height="200" />
+  <label>
+    <span>Manual key</span>
+    <code>{{ totp_setup.manual_key }}</code>
+  </label>
+  <label>
+    <span>Authentication code</span>
+    <input name="code" inputmode="numeric" pattern="[0-9 ]{6,8}" autocomplete="one-time-code" required autofocus />
+  </label>
+  <div class="form-actions">
+    <button class="btn primary" type="submit">Confirm and enable</button>
+  </div>
+</form>
+<form method="post" action="/settings/totp/cancel" class="form-grid">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+  <div class="form-actions">
+    <button class="btn ghost" type="submit">Cancel setup</button>
+  </div>
+</form>
+{% else %}
+<form method="post" action="/settings/totp/start" class="form-grid">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+  <div class="form-actions">
+    <button class="btn primary" type="submit">Set up authenticator</button>
+  </div>
+</form>
+{% endif %}
+
 <section class="note">
   <h2>Certificate maintenance</h2>
   <p>Traefik stores ACME state in <code>acme.json</code> and renews before expiry. Adding a service in the GUI is enough — no manual certificate upload.</p>

@@ -43,9 +43,10 @@ def _reset_config() -> None:
 @pytest.fixture(autouse=True)
 def fresh_config():
     _reset_config()
-    from gui.app.auth import login_throttle
+    from gui.app import auth
 
-    login_throttle._state.clear()
+    auth.login_throttle._state.clear()
+    auth._last_totp_timestep = None
     yield
 
 

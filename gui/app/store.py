@@ -67,6 +67,12 @@ class Settings:
     admin_user: str = "admin"
     # password hash stored in gui.env; empty means not configured yet
     admin_password_hash: str = ""
+    # base32 TOTP secret; empty means 2FA disabled
+    totp_secret: str = ""
+
+    @property
+    def totp_enabled(self) -> bool:
+        return bool(self.totp_secret)
 
     @property
     def allowed_domains(self) -> list[str]:
@@ -145,6 +151,7 @@ def load_settings() -> Settings:
         acme_staging=staging,
         admin_user=gui.get("ADMIN_USER") or "admin",
         admin_password_hash=gui.get("ADMIN_PASSWORD_HASH") or "",
+        totp_secret=gui.get("TOTP_SECRET") or "",
     )
 
 
@@ -152,6 +159,20 @@ def save_gui_auth(user: str, password_hash: str) -> None:
     existing = _read_env_file(SETTINGS_FILE)
     existing["ADMIN_USER"] = user
     existing["ADMIN_PASSWORD_HASH"] = password_hash
+    _write_env_file(
+        SETTINGS_FILE,
+        existing,
+        "# Gate admin GUI credentials — do not commit.",
+    )
+
+
+def save_totp_secret(secret: str) -> None:
+    """Enable TOTP (secret is base32). Pass empty string to disable."""
+    existing = _read_env_file(SETTINGS_FILE)
+    if secret:
+        existing["TOTP_SECRET"] = secret
+    else:
+        existing.pop("TOTP_SECRET", None)
     _write_env_file(
         SETTINGS_FILE,
         existing,

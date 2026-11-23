@@ -10,9 +10,14 @@ import bcrypt
 from .store import load_settings, save_gui_auth
 
 SESSION_USER_KEY = "gate_user"
+SESSION_PENDING_2FA = "gate_pending_2fa"
+SESSION_PENDING_TOTP_SECRET = "gate_pending_totp_secret"
 
 USERNAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$")
 MIN_PASSWORD_LENGTH = 10
+
+# Last successfully used TOTP timestep per process (replay protection).
+_last_totp_timestep: int | None = None
 
 # Verified against when no account exists or the username does not match, so
 # a login attempt always costs one bcrypt verification (no timing oracle for
@@ -60,6 +65,26 @@ def bootstrap_admin(username: str, password: str) -> str:
         raise ValueError(f"Password must be at least {MIN_PASSWORD_LENGTH} characters.")
     save_gui_auth(username, hash_password(password))
     return username
+
+
+def totp_enabled() -> bool:
+    return load_settings().totp_enabled
+
+
+def verify_totp(code: str) -> bool:
+    """Verify a TOTP code against the stored secret; blocks timestep reuse."""
+    global _last_totp_timestep
+    from .totp import verify_code
+
+    settings = load_settings()
+    if not settings.totp_secret:
+        return False
+    ok, timestep = verify_code(
+        settings.totp_secret, code, last_timestep=_last_totp_timestep
+    )
+    if ok and timestep is not None:
+        _last_totp_timestep = timestep
+    return ok
 
 
 class LoginThrottle:

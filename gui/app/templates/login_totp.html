@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="auth-panel">
+  <p class="eyebrow">Two-factor authentication</p>
+  <h1 class="auth-title">Authenticator</h1>
+  <p class="lede">Enter the 6-digit code from your authenticator app.</p>
+  <form method="post" action="/login/totp" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <label>
+      <span>Authentication code</span>
+      <input name="code" inputmode="numeric" pattern="[0-9 ]{6,8}" autocomplete="one-time-code" required autofocus placeholder="123456" />
+    </label>
+    <button class="btn primary" type="submit">Verify</button>
+  </form>
+  <form method="post" action="/logout" class="stack" style="margin-top: 1rem;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <button class="btn ghost" type="submit">Cancel</button>
+  </form>
+</section>
+{% endblock %}

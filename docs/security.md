@@ -33,7 +33,7 @@ Internet ──(untrusted)──> Traefik :80/:443 ──(semi-trusted LAN)─�
 | Surface | Mechanism |
 |---|---|
 | Proxmox UI/API | Native PVE auth (tickets, CSRF tokens) passes through the proxy untouched; the gate adds no header rewriting on that path |
-| Gate GUI | Single local admin account: bcrypt (cost 12), constant-time username/password evaluation, per-user and per-IP lockout (5 failures → 15 min), session rotation on login, CSRF token on every state-changing form, `SameSite=Lax` + `HttpOnly` (+`Secure` with `GATE_HTTPS_ONLY=1`) cookies, 8 h session lifetime. Published on the internet by default; password auth is the primary control. |
+| Gate GUI | Single local admin account: bcrypt (cost 12), constant-time username/password evaluation, optional TOTP 2FA (RFC 6238; enable under Settings → Authenticator), per-user and per-IP lockout (5 failures → 15 min, also on TOTP), session rotation on login, CSRF token on every state-changing form, `SameSite=Lax` + `HttpOnly` (+`Secure` with `GATE_HTTPS_ONLY=1`) cookies, 8 h session lifetime. Published on the internet by default; password (+ optional TOTP) is the primary control. TOTP secret lives in `config/gui.env` (`TOTP_SECRET`, mode 600); the same code cannot be reused within its 30s window. |
 | Traefik edge | `auth-ratelimit` on `gate.<domain>` (credential stuffing slowdown). Optional `admin-allowlist` if you later want IP restriction. Prefer `admin-allowlist` and/or VPN for `pve.<domain>`. |
 
 ### First-run window
@@ -92,7 +92,7 @@ gate can reach (that is its job). Keep the services network segmented so
 
 | File | Mode | Contents |
 |---|---|---|
-| `/opt/gate/config/gui.env` | `600` | admin username + bcrypt hash |
+| `/opt/gate/config/gui.env` | `600` | admin username + bcrypt hash + optional `TOTP_SECRET` |
 | `/opt/gate/config/cloudflare.env` | `600` | Cloudflare API token (scope it to only the zones Gate manages: `Zone→Zone→Read`, `Zone→DNS→Edit`) |
 | `/etc/gate-admin.env` | `600` | `GATE_SESSION_SECRET` |
 | `/var/lib/traefik/acme.json` | `600` | ACME account + private keys |

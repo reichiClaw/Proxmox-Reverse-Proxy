@@ -664,7 +664,9 @@ Forward WAN 80/443 → Gate LXC IP. Remove old forwards that published apps or P
 ### 10.4 Gate is public; PVE should stay locked down
 
 `gate.<domain>` is meant to be reachable from the internet. Protection is
-the Gate username/password (plus rate limit + login lockout). Optional:
+the Gate username/password (plus rate limit + login lockout). Enable an
+authenticator app (TOTP) under **Settings → Authenticator** for a second
+factor — recommended once the gate is on the public internet. Optional:
 uncomment `admin-allowlist` in `gate.yml` if you later want IP restriction.
 
 For `pve.<domain>`, prefer enabling `admin-allowlist` (or VPN-only DNS) —
@@ -826,7 +828,7 @@ sudo -u gate bash -lc './scripts/add-service.sh gitea http://192.168.1.20:3000'
       `gate.<domain>` can claim it
 - [ ] `/etc/traefik/certs/pve-root-ca.pem` installed; PVE backend TLS verified
       (never `insecureSkipVerify`)
-- [ ] Strong Gate GUI password; `config/gui.env` mode `600`, owned by `gate`
+- [ ] Strong Gate GUI password; enable TOTP under Settings → Authenticator; `config/gui.env` mode `600`, owned by `gate`
 - [ ] `acme.json` mode `600`
 - [ ] `GATE_SESSION_SECRET` set in `/etc/gate-admin.env` (root:root, `600`)
 - [ ] `GATE_HTTPS_ONLY=1` in the GUI unit (already in shipped unit)
