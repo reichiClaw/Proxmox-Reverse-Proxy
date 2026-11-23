@@ -489,8 +489,8 @@ $( [[ "$WITH_WHOAMI" -eq 1 ]] && echo " Smoke test:     https://whoami.${DOMAIN}
            (or at your WAN IP with 80/443 forwarded to it)
  2. Ports: forward/allow TCP 80 and 443 to ${ip_only} — nothing else
  3. Visit  https://gate.${DOMAIN} and CREATE THE ADMIN ACCOUNT NOW
-           (until it exists, anyone who can reach the page can claim it;
-            the default route only allows private networks)
+           (gate is public + password-protected; until setup finishes,
+            anyone on the internet who can reach it can claim the admin)
  4. ACME starts on Let's Encrypt STAGING (untrusted certs by design).
     After https://whoami.${DOMAIN} works end-to-end, switch to
     production in Gate → Settings.

@@ -661,10 +661,14 @@ If the Proxmox firewall is enabled on the CT or datacenter:
 
 Forward WAN 80/443 → Gate LXC IP. Remove old forwards that published apps or PVE directly.
 
-### 10.4 Admin allowlist middleware
+### 10.4 Gate is public; PVE should stay locked down
 
-Shipped `gate.yml` attaches `admin-allowlist` (private RFC1918 ranges) from `middlewares.yml`.  
-If you need to reach `gate.<domain>` from a public IP (or CGNAT VPN range), edit `/opt/gate/config/dynamic/middlewares.yml` and add your admin IP / VPN CIDR to `sourceRange`, or temporarily remove `admin-allowlist` from `gate.yml` until you confirm login works on LAN.
+`gate.<domain>` is meant to be reachable from the internet. Protection is
+the Gate username/password (plus rate limit + login lockout). Optional:
+uncomment `admin-allowlist` in `gate.yml` if you later want IP restriction.
+
+For `pve.<domain>`, prefer enabling `admin-allowlist` (or VPN-only DNS) —
+hypervisor access should not rely on passwords alone at the edge.
 
 ---
 
@@ -706,7 +710,7 @@ Browser:
 3. Sign in → **Services** should list `whoami`, `gate`, `pve`
 4. Open **Settings** and confirm domain + ACME email
 
-If `admin-allowlist` blocks you, use LAN IP or adjust the middleware as in §10.4.
+Create the admin account on first visit before leaving the host unattended.
 
 ---
 
@@ -816,9 +820,10 @@ sudo -u gate bash -lc './scripts/add-service.sh gitea http://192.168.1.20:3000'
 - [ ] Only `:80` and `:443` published on WAN
 - [ ] `:8006` / guest ports not forwarded publicly
 - [ ] VPN or LAN break-glass to Proxmox still works
-- [ ] `admin-allowlist` (or VPN-only DNS) on `gate.` and preferably `pve.`
+- [ ] `admin-allowlist` (or VPN-only DNS) on `pve.` (recommended); optional on `gate.`
 - [ ] **Complete Gate GUI setup immediately after starting it** — until the
-      first admin account exists, anyone who can reach the GUI can claim it
+      first admin account exists, anyone on the internet who can reach
+      `gate.<domain>` can claim it
 - [ ] `/etc/traefik/certs/pve-root-ca.pem` installed; PVE backend TLS verified
       (never `insecureSkipVerify`)
 - [ ] Strong Gate GUI password; `config/gui.env` mode `600`, owned by `gate`
@@ -939,35 +944,19 @@ scanners hitting the bare IP from getting a TLS response.
 1. `systemctl status gate-admin`
 2. `curl -sI http://127.0.0.1:8080/setup`
 3. Traefik route `gate.yml` upstream `http://127.0.0.1:8080`?
-4. Blocked by `admin-allowlist`? Try from LAN or add your IP
+4. Still 403? Check whether `admin-allowlist` was re-enabled in `gate.yml`
 
 ### `https://gate.<domain>` shows / downloads “Forbidden”
 
-That is Traefik **403** from `admin-allowlist`. The allowlist only permits
-private ranges (`10/8`, `172.16/12`, `192.168/16`). Traefik sees a **public**
-client IP when you:
-
-- open the public hostname via WAN hairpin NAT, or
-- proxy `gate` through Cloudflare (orange cloud)
-
-**Fix (pick one):**
+That is Traefik **403** from `admin-allowlist` (optional middleware). Current
+defaults leave it **off** for `gate.` so the UI is reachable from the
+internet with password auth. If you enabled the allowlist and need public
+access again:
 
 ```bash
-# A) From a LAN PC — bypass hairpin (replace with your CT IP):
-echo "10.2.0.4 gate.rcserver.io" | sudo tee -a /etc/hosts
-# then open https://gate.rcserver.io again
-
-# B) See which IP was blocked, then allow it:
-pct exec 103 -- journalctl -u traefik -n 50 --no-pager | grep 403
-# add that IP under admin-allowlist.sourceRange in
-# /opt/gate/config/dynamic/middlewares.yml
-
-# C) Temporary (setup only) — remove the allowlist line from gate.yml:
 pct exec 103 -- sed -i '/admin-allowlist/d' /opt/gate/config/dynamic/apps/gate.yml
-# restore it after creating the admin account
+# or add your VPN/LAN CIDRs under admin-allowlist.sourceRange in middlewares.yml
 ```
-
-If Cloudflare is proxying `gate`, set the record to **DNS only** (grey cloud).
 
 ### Proxmox console (noVNC) fails through proxy
 
@@ -1041,16 +1030,11 @@ Use when port 80 cannot be opened, or you want one wildcard cert for all subdoma
 
 New GUI-added subdomains then need no per-host ACME round trip if they are covered by the wildcard.
 
-### D. Publishing the Gate GUI without allowlist (lab only)
+### D. Optional IP allowlist on Gate
 
-In `/opt/gate/config/dynamic/apps/gate.yml`, under `middlewares`, leave only:
-
-```yaml
-middlewares:
-  - secured
-```
-
-Re-enable `admin-allowlist` before exposing the UI to the internet.
+Default `gate.yml` is public (password-protected). To restrict by IP as well,
+uncomment `admin-allowlist` in that file and adjust `sourceRange` in
+`middlewares.yml`.
 
 ### E. Using `deploy/sync-config.sh` from the Proxmox host
 

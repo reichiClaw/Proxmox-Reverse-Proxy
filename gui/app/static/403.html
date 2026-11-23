@@ -12,10 +12,11 @@
   </style>
 </head>
 <body>
-  <h1>403 — Gate admin allowlist</h1>
+  <h1>403 — IP allowlist</h1>
   <p>
     Traefik blocked this request because your client IP is not in
-    <code>admin-allowlist</code> (private LAN ranges by default).
+    <code>admin-allowlist</code>. By default Gate is public (password auth);
+    this page only appears if that optional middleware was enabled.
   </p>
   <p>Common causes:</p>
   <ul>

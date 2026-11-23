@@ -272,7 +272,7 @@ This repo mirrors that under `config/`.
 ## Security model
 
 1. Only Traefik `80/443` exposed.
-2. Admin UIs (`pve.`, Traefik dashboard): allowlist and/or VPN.
+2. Admin UIs: `gate.` is password-protected and internet-facing by default; `pve.` / Traefik dashboard should use allowlist and/or VPN.
 3. Phase-1 auth = native app auth; ForwardAuth later for non-PVE apps.
 4. Protect `acme.json`; back it up encrypted.
 5. Guests must not be directly reachable from untrusted networks.

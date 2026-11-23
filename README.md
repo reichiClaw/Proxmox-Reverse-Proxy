@@ -5,7 +5,7 @@ TLS **Main Gate** for a Proxmox instance: one Traefik proxy terminates HTTPS and
 ## Quick mental model
 
 ```text
-https://gate.<domain>      → Admin GUI (add services & settings)
+https://gate.<domain>      → Admin GUI (internet-facing, password login)
 https://pve.<domain>       → Proxmox VE
 https://gitea.<domain>     → guest app
 https://<name>.<domain>    → any new service (any configured domain)

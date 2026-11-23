@@ -33,15 +33,15 @@ Internet ──(untrusted)──> Traefik :80/:443 ──(semi-trusted LAN)─�
 | Surface | Mechanism |
 |---|---|
 | Proxmox UI/API | Native PVE auth (tickets, CSRF tokens) passes through the proxy untouched; the gate adds no header rewriting on that path |
-| Gate GUI | Single local admin account: bcrypt (cost 12), constant-time username/password evaluation, per-user and per-IP lockout (5 failures → 15 min), session rotation on login, CSRF token on every state-changing form, `SameSite=Lax` + `HttpOnly` (+`Secure` with `GATE_HTTPS_ONLY=1`) cookies, 8 h session lifetime |
-| Traefik edge | `admin-allowlist` (direct peer IP) + `auth-ratelimit` middlewares on `gate.<domain>`; recommended on `pve.<domain>` |
+| Gate GUI | Single local admin account: bcrypt (cost 12), constant-time username/password evaluation, per-user and per-IP lockout (5 failures → 15 min), session rotation on login, CSRF token on every state-changing form, `SameSite=Lax` + `HttpOnly` (+`Secure` with `GATE_HTTPS_ONLY=1`) cookies, 8 h session lifetime. Published on the internet by default; password auth is the primary control. |
+| Traefik edge | `auth-ratelimit` on `gate.<domain>` (credential stuffing slowdown). Optional `admin-allowlist` if you later want IP restriction. Prefer `admin-allowlist` and/or VPN for `pve.<domain>`. |
 
 ### First-run window
 
 Until the first admin account is created, `/setup` will accept whoever
-reaches it first. Mitigations: the shipped `gate.yml` route is behind
-`admin-allowlist`, and the GUI binds to `127.0.0.1`. **Complete setup
-immediately after enabling the service.**
+reaches it first. The GUI process still binds to `127.0.0.1` only (Traefik
+is the public front). **Create the admin account immediately** after DNS
+and ports work — before leaving the installer.
 
 ## What the GUI can and cannot write
 

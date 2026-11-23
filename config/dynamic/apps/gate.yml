@@ -1,5 +1,7 @@
 # Admin GUI for managing Gate routes/settings.
-# Point upstream at the host/port where `python -m gui` listens.
+# Intended to be reachable from the internet; protection is the Gate login
+# (bcrypt password + CSRF + per-IP lockout) plus auth-ratelimit at the edge.
+# Optional extra hardening: uncomment admin-allowlist below.
 # https://gate.example.com
 
 http:
@@ -14,7 +16,7 @@ http:
       middlewares:
         - secured
         - gate-errors
-        - admin-allowlist
+        # - admin-allowlist   # optional: restrict to private/VPN IPs
         - auth-ratelimit
         - gate-buffering
 
@@ -25,7 +27,7 @@ http:
         servers:
           - url: "http://127.0.0.1:8080"
     # Used only by the gate-errors middleware (Traefik fetches this itself
-    # from localhost — not subject to admin-allowlist on the client path).
+    # from localhost when admin-allowlist is enabled).
     gate-error-pages:
       loadBalancer:
         servers:
