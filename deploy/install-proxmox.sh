@@ -33,6 +33,7 @@
 #   --no-whoami           Skip the whoami smoke-test service
 #   --no-firewall         Skip ufw configuration inside the CT
 #   --dry-run             Print host-side actions without executing
+#   --reinstall           Re-run install into an existing CT (idempotent)
 #   --inside              (internal) container-side phase
 #   -h, --help            This help
 
@@ -58,6 +59,7 @@ TRAEFIK_VERSION="v3.5.3"
 WITH_WHOAMI=1
 WITH_FIREWALL=1
 DRY_RUN=0
+REINSTALL=0
 INSIDE=0
 
 log()  { echo -e "\033[1;32m[gate]\033[0m $*"; }
@@ -86,11 +88,22 @@ while [[ $# -gt 0 ]]; do
     --no-whoami) WITH_WHOAMI=0; shift ;;
     --no-firewall) WITH_FIREWALL=0; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
+    --reinstall) REINSTALL=1; shift ;;
     --inside) INSIDE=1; shift ;;
     -h|--help) usage 0 ;;
     *) die "Unknown option: $1 (see --help)" ;;
   esac
 done
+
+# Run a command as the unprivileged gate user. Minimal Debian CTs do not
+# ship sudo; util-linux `runuser` is always available.
+as_gate() {
+  if command -v runuser >/dev/null 2>&1; then
+    runuser -u gate -- "$@"
+  else
+    su -s /bin/bash gate -c '"$@"' -- "$@"
+  fi
+}
 
 validate_domain() {
   [[ "$1" =~ ^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z][a-z0-9-]*$ ]]
@@ -118,11 +131,13 @@ inside_phase() {
   validate_email "$ACME_EMAIL" || die "Invalid ACME email: $ACME_EMAIL"
 
   export DEBIAN_FRONTEND=noninteractive
+  # Quiet "locale not found" noise from apt/perl in minimal CTs.
+  export LANG=C.UTF-8 LC_ALL=C.UTF-8
 
   log "Installing OS packages"
   apt-get update -qq
   apt-get install -y -qq ca-certificates curl git python3 python3-venv \
-    ufw jq dnsutils openssl >/dev/null
+    ufw jq dnsutils openssl iproute2 >/dev/null
 
   log "Creating gate user and directories"
   id gate &>/dev/null || useradd --system --home /opt/gate --shell /usr/sbin/nologin gate
@@ -229,9 +244,10 @@ EOF
 
   log "Creating Python venv for the Gate GUI"
   chown -R gate:gate /opt/gate
-  sudo -u gate python3 -m venv /opt/gate/.venv
-  sudo -u gate /opt/gate/.venv/bin/pip install --quiet --upgrade pip
-  sudo -u gate /opt/gate/.venv/bin/pip install --quiet -r /opt/gate/gui/requirements.txt
+  # Minimal Debian CTs do not include sudo — use runuser from util-linux.
+  as_gate python3 -m venv /opt/gate/.venv
+  as_gate /opt/gate/.venv/bin/pip install --quiet --upgrade pip
+  as_gate /opt/gate/.venv/bin/pip install --quiet -r /opt/gate/gui/requirements.txt
 
   if [[ ! -f /etc/gate-admin.env ]]; then
     log "Generating session secret"
@@ -325,38 +341,56 @@ host_phase() {
     host_ip="$(hostname -I | awk '{print $1}')"
     PVE_UPSTREAM="https://${host_ip}:8006"
     log "Defaulting PVE upstream to ${PVE_UPSTREAM}"
+    # Warn when the gate lives on a different L3 network than the host IP —
+    # the CT must be able to reach :8006 for the pve route to work.
+    local ct_net="${CT_IP%.*}"
+    local host_net="${host_ip%.*}"
+    if [[ -n "$host_ip" && "$ct_net" != "$host_net" ]]; then
+      warn "Gate (${CT_IP}) and PVE (${host_ip}) look like different subnets."
+      warn "If the CT cannot reach ${host_ip}:8006, re-run with e.g."
+      warn "  --pve-upstream https://<pve-ip-reachable-from-gate>:8006"
+    fi
   fi
 
+  local ct_exists=0
   if pct status "$VMID" &>/dev/null; then
-    die "CT ${VMID} already exists. Choose another --vmid (or remove it first)."
-  fi
+    ct_exists=1
+    if [[ "$REINSTALL" -ne 1 ]]; then
+      # Mid-install recovery: CT is already there, finish the inside phase.
+      log "CT ${VMID} already exists — resuming container-side install"
+      log "(pass --reinstall explicitly next time, or use another --vmid for a fresh CT)"
+    else
+      log "CT ${VMID} already exists — --reinstall: re-running container-side install"
+    fi
+    run pct start "$VMID" 2>/dev/null || true
+  else
+    log "Looking for a Debian 12 CT template"
+    local template
+    template="$(pveam list "$TEMPLATE_STORAGE" 2>/dev/null | awk '/debian-12-standard/ {print $1}' | sort -V | tail -1)"
+    if [[ -z "$template" ]]; then
+      run pveam update
+      local remote
+      remote="$(pveam available --section system | awk '/debian-12-standard/ {print $2}' | sort -V | tail -1)"
+      [[ -n "$remote" || "$DRY_RUN" -eq 1 ]] || die "No debian-12-standard template available."
+      log "Downloading template ${remote:-<latest>}"
+      run pveam download "$TEMPLATE_STORAGE" "${remote:-debian-12-standard}"
+      template="${TEMPLATE_STORAGE}:vztmpl/${remote:-debian-12-standard}"
+    fi
+    log "Using template: ${template:-<dry-run>}"
 
-  log "Looking for a Debian 12 CT template"
-  local template
-  template="$(pveam list "$TEMPLATE_STORAGE" 2>/dev/null | awk '/debian-12-standard/ {print $1}' | sort -V | tail -1)"
-  if [[ -z "$template" ]]; then
-    run pveam update
-    local remote
-    remote="$(pveam available --section system | awk '/debian-12-standard/ {print $2}' | sort -V | tail -1)"
-    [[ -n "$remote" || "$DRY_RUN" -eq 1 ]] || die "No debian-12-standard template available."
-    log "Downloading template ${remote:-<latest>}"
-    run pveam download "$TEMPLATE_STORAGE" "${remote:-debian-12-standard}"
-    template="${TEMPLATE_STORAGE}:vztmpl/${remote:-debian-12-standard}"
+    log "Creating unprivileged CT ${VMID} (${CT_HOSTNAME}, ${CT_IP} on ${BRIDGE})"
+    # No root password is set: access the container with `pct enter ${VMID}`.
+    run pct create "$VMID" "$template" \
+      --hostname "$CT_HOSTNAME" \
+      --memory "$MEMORY" \
+      --cores "$CORES" \
+      --rootfs "${STORAGE}:${DISK}" \
+      --net0 "name=eth0,bridge=${BRIDGE},ip=${CT_IP},gw=${GATEWAY},firewall=1" \
+      --unprivileged 1 \
+      --features nesting=1 \
+      --onboot 1 \
+      --start 1
   fi
-  log "Using template: ${template:-<dry-run>}"
-
-  log "Creating unprivileged CT ${VMID} (${CT_HOSTNAME}, ${CT_IP} on ${BRIDGE})"
-  # No root password is set: access the container with `pct enter ${VMID}`.
-  run pct create "$VMID" "$template" \
-    --hostname "$CT_HOSTNAME" \
-    --memory "$MEMORY" \
-    --cores "$CORES" \
-    --rootfs "${STORAGE}:${DISK}" \
-    --net0 "name=eth0,bridge=${BRIDGE},ip=${CT_IP},gw=${GATEWAY},firewall=1" \
-    --unprivileged 1 \
-    --features nesting=1 \
-    --onboot 1 \
-    --start 1
 
   log "Waiting for network inside the CT"
   if [[ "$DRY_RUN" -eq 0 ]]; then
@@ -369,6 +403,8 @@ host_phase() {
     done
     [[ "$up" -eq 1 ]] || die "CT has no outbound network — check bridge/IP/gateway/DNS."
   fi
+  # silence unused-var warning when CT was just created
+  : "${ct_exists}"
 
   log "Pushing installer and PVE cluster CA into the CT"
   run pct push "$VMID" "$(readlink -f "$0")" /root/gate-install.sh

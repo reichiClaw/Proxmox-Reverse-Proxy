@@ -43,8 +43,12 @@ The script:
    **creating the GUI admin account immediately**
 
 Useful options: `--storage`, `--bridge`, `--pve-upstream`, `--dry-run`
-(prints host-side actions without executing), `-h` for all flags.
+(prints host-side actions without executing), `--reinstall` (resume /
+re-run into an existing CT after a mid-install failure), `-h` for all flags.
 No container root password is set — use `pct enter <vmid>`.
+
+If the gate CT is on a different subnet from the Proxmox host IP, pass
+`--pve-upstream https://<ip-the-gate-can-reach>:8006` explicitly.
 
 Afterwards continue with [§11 (smoke test)](#11-first-smoke-test-staging-certificates)
 and [§12 (Proxmox cutover)](#12-put-proxmox-ve-behind-the-gate).
