@@ -26,9 +26,4 @@ http:
         passHostHeader: true
         servers:
           - url: "http://127.0.0.1:8080"
-    # Used only by the gate-errors middleware (Traefik fetches this itself
-    # from localhost when admin-allowlist is enabled).
-    gate-error-pages:
-      loadBalancer:
-        servers:
-          - url: "http://127.0.0.1:8080"
+    # gate-error-pages lives in ../error-pages.yml (do not redefine here)

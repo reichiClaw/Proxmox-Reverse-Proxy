@@ -355,6 +355,12 @@ def get_service(name: str) -> Service | None:
 
 def _render_app_yaml(name: str, domain: str, upstream: str, middlewares: list[str] | None = None) -> str:
     mws = validate_middlewares(middlewares or ["secured"])
+    # Gate admin UI must keep edge middlewares even if a stale parse dropped them.
+    if name == "gate":
+        required = ["secured", "gate-errors", "auth-ratelimit", "gate-buffering"]
+        for mw in required:
+            if mw not in mws:
+                mws.append(mw)
     mw_yaml = "\n".join(f"        - {m}" for m in mws)
     host = f"{name}.{domain}"
     return (

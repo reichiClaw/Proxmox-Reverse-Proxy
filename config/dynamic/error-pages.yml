@@ -1,0 +1,8 @@
+# Shared Traefik service used by the gate-errors middleware (403 HTML).
+# Kept outside apps/*.yml so the Gate GUI cannot drop it when rewriting routes.
+http:
+  services:
+    gate-error-pages:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:8080"

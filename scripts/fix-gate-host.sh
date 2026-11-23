@@ -65,6 +65,20 @@ if [[ -d /etc/traefik/dynamic/apps ]] && [[ ! /etc/traefik/dynamic -ef /opt/gate
   done
 fi
 
+# Ensure error-pages service exists (gate-errors middleware needs it).
+if [[ ! -f /opt/gate/config/dynamic/error-pages.yml ]]; then
+  cat >/opt/gate/config/dynamic/error-pages.yml <<'EOF'
+http:
+  services:
+    gate-error-pages:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:8080"
+EOF
+  chown gate:gate /opt/gate/config/dynamic/error-pages.yml 2>/dev/null || true
+  echo "Wrote missing config/dynamic/error-pages.yml"
+fi
+
 systemctl restart gate-admin
 systemctl restart traefik
 sleep 2
