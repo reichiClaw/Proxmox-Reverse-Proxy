@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Forbidden · Gate</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 40rem; margin: 3rem auto; padding: 0 1rem; line-height: 1.5; color: #14212b; }
+    code { background: #f0f0f0; padding: 0.1em 0.35em; border-radius: 4px; }
+    h1 { letter-spacing: -0.03em; }
+    li { margin: 0.4rem 0; }
+  </style>
+</head>
+<body>
+  <h1>403 — Gate admin allowlist</h1>
+  <p>
+    Traefik blocked this request because your client IP is not in
+    <code>admin-allowlist</code> (private LAN ranges by default).
+  </p>
+  <p>Common causes:</p>
+  <ul>
+    <li>Opening <code>https://gate.&lt;domain&gt;</code> via the public WAN / hairpin NAT (Traefik sees your public IP)</li>
+    <li>Cloudflare proxy (orange cloud) — Traefik sees Cloudflare’s IPs</li>
+    <li>Accessing from the internet or a mobile network</li>
+  </ul>
+  <p><strong>Quick fixes</strong></p>
+  <ol>
+    <li>From a LAN machine, put <code>10.x.x.x gate.your.domain</code> in <code>/etc/hosts</code> (gate CT IP) and retry — source IP stays private.</li>
+    <li>Or grey-cloud the <code>gate</code> record in Cloudflare (DNS only).</li>
+    <li>Or add your client IP under <code>sourceRange</code> in
+      <code>config/dynamic/middlewares.yml</code> and wait for Traefik to reload.</li>
+  </ol>
+  <p>See Traefik access logs for the blocked IP:
+    <code>journalctl -u traefik -n 50 | grep 403</code></p>
+</body>
+</html>

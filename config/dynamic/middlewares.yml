@@ -20,10 +20,11 @@ http:
       compress: {}
 
     # Attach to admin UIs (pve, dashboard) when ready:
-    # middlewares: ["secured", "admin-allowlist"]
-    # ipAllowList matches on the direct connection's remote address (Traefik
-    # does not trust client-supplied X-Forwarded-For unless trustedIPs is
-    # configured on the entrypoint).
+    # middlewares: ["secured", "gate-errors", "admin-allowlist"]
+    # ipAllowList matches on the DIRECT TCP peer (not X-Forwarded-For).
+    # Hairpin NAT / Cloudflare orange-cloud → Traefik sees a PUBLIC IP → 403.
+    # Fix: hosts-file to the CT IP, grey-cloud the gate record, or add your
+    # client/WAN IP below.
     admin-allowlist:
       ipAllowList:
         sourceRange:
@@ -31,6 +32,16 @@ http:
           - "10.0.0.0/8"
           - "172.16.0.0/12"
           - "192.168.0.0/16"
+          # - "203.0.113.10/32"  # example: your WAN IP (hairpin / remote admin)
+
+    # Turn Traefik's plain-text "Forbidden" into an HTML page (so browsers
+    # don't download a file). Fetched server-side from the GUI static files.
+    gate-errors:
+      errors:
+        status:
+          - "403"
+        service: gate-error-pages
+        query: "/static/403.html"
 
     # Per-source-IP rate limit for authentication-sensitive routes (Gate GUI,
     # optionally pve). Slows credential stuffing without hurting normal use.

@@ -941,6 +941,34 @@ scanners hitting the bare IP from getting a TLS response.
 3. Traefik route `gate.yml` upstream `http://127.0.0.1:8080`?
 4. Blocked by `admin-allowlist`? Try from LAN or add your IP
 
+### `https://gate.<domain>` shows / downloads “Forbidden”
+
+That is Traefik **403** from `admin-allowlist`. The allowlist only permits
+private ranges (`10/8`, `172.16/12`, `192.168/16`). Traefik sees a **public**
+client IP when you:
+
+- open the public hostname via WAN hairpin NAT, or
+- proxy `gate` through Cloudflare (orange cloud)
+
+**Fix (pick one):**
+
+```bash
+# A) From a LAN PC — bypass hairpin (replace with your CT IP):
+echo "10.2.0.4 gate.rcserver.io" | sudo tee -a /etc/hosts
+# then open https://gate.rcserver.io again
+
+# B) See which IP was blocked, then allow it:
+pct exec 103 -- journalctl -u traefik -n 50 --no-pager | grep 403
+# add that IP under admin-allowlist.sourceRange in
+# /opt/gate/config/dynamic/middlewares.yml
+
+# C) Temporary (setup only) — remove the allowlist line from gate.yml:
+pct exec 103 -- sed -i '/admin-allowlist/d' /opt/gate/config/dynamic/apps/gate.yml
+# restore it after creating the admin account
+```
+
+If Cloudflare is proxying `gate`, set the record to **DNS only** (grey cloud).
+
 ### Proxmox console (noVNC) fails through proxy
 
 1. Confirm WebSocket upgrade — try another browser, disable broken extensions

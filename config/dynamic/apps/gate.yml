@@ -13,6 +13,7 @@ http:
       service: gate
       middlewares:
         - secured
+        - gate-errors
         - admin-allowlist
         - auth-ratelimit
         - gate-buffering
@@ -21,5 +22,11 @@ http:
     gate:
       loadBalancer:
         passHostHeader: true
+        servers:
+          - url: "http://127.0.0.1:8080"
+    # Used only by the gate-errors middleware (Traefik fetches this itself
+    # from localhost — not subject to admin-allowlist on the client path).
+    gate-error-pages:
+      loadBalancer:
         servers:
           - url: "http://127.0.0.1:8080"
