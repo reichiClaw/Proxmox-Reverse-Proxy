@@ -50,6 +50,11 @@ No container root password is set — use `pct enter <vmid>`.
 If the gate CT is on a different subnet from the Proxmox host IP, pass
 `--pve-upstream https://<ip-the-gate-can-reach>:8006` explicitly.
 
+The installer checks that the **CT itself** can reach that upstream (HTTPS
+to `:8006`). Firewall rules must allow the gate CT IP — allowing only the
+gateway (e.g. `10.2.0.1`) is not enough. Proxmox VE listens on **8006**, not
+8004.
+
 Afterwards continue with [§11 (smoke test)](#11-first-smoke-test-staging-certificates)
 and [§12 (Proxmox cutover)](#12-put-proxmox-ve-behind-the-gate).
 The manual path below produces the same result step by step.

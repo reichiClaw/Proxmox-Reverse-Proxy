@@ -306,7 +306,56 @@ EOF
   curl -fsS http://127.0.0.1:8080/healthz >/dev/null 2>&1 \
     || { warn "Gate GUI /healthz not responding"; ok=0; }
   ss -lnt "sport = :443" | grep -q 443 || { warn "Traefik is not listening on :443"; ok=0; }
+
+  if ! check_pve_upstream "$PVE_UPSTREAM"; then
+    ok=0
+  fi
+
   [[ "$ok" -eq 1 ]] && log "All services healthy" || warn "Some checks failed — see journalctl -u traefik -u gate-admin"
+}
+
+# Verify the Gate CT can reach the Proxmox UI/API. The check must succeed from
+# the CT's own IP (not the gateway): firewall rules that only allow the
+# gateway (e.g. 10.2.0.1 → PVE) do not help Traefik running as 10.2.0.4.
+check_pve_upstream() {
+  local url="$1"
+  local host port code
+
+  # Strip scheme and path: https://10.0.0.4:8006/foo → 10.0.0.4:8006
+  host="${url#*://}"
+  host="${host%%/*}"
+  if [[ "$host" == \[*\]* ]]; then
+    # IPv6 literal https://[fd00::1]:8006
+    port="${host##*]:}"
+    host="${host#\[}"
+    host="${host%%]*}"
+    [[ "$port" =~ ^[0-9]+$ ]] || port=8006
+  elif [[ "$host" == *:* ]]; then
+    port="${host##*:}"
+    host="${host%:*}"
+  else
+    port=8006
+  fi
+
+  log "Checking PVE upstream reachability: ${host}:${port} (from this CT)"
+  # -k: PVE's default cert is self-signed; we only care about reachability.
+  code="$(curl -ksS --connect-timeout 5 --max-time 10 \
+    -o /dev/null -w '%{http_code}' "https://${host}:${port}/" 2>/dev/null || true)"
+
+  if [[ "$code" =~ ^[12345][0-9][0-9]$ ]]; then
+    log "PVE upstream reachable at ${host}:${port} (HTTP ${code})"
+    return 0
+  fi
+
+  warn "Cannot reach Proxmox at ${host}:${port} from this container."
+  warn "The pve.<domain> route will return 502 until this works."
+  warn "Firewall tip: allow the GATE CT IP → ${host}:${port}, not only the gateway."
+  warn "  Wrong:  ACCEPT 10.2.0.1  → ${host}:${port}   (gateway)"
+  warn "  Right:  ACCEPT <gate-ip> → ${host}:${port}   (this CT, e.g. 10.2.0.4)"
+  warn "Also confirm the port: Proxmox VE UI/API is :8006 (not :8004)."
+  warn "Re-test with:  pct exec <vmid> -- curl -kI https://${host}:${port}/"
+  warn "Or re-run with:  --pve-upstream https://<reachable-pve-ip>:8006"
+  return 1
 }
 
 # ---------------------------------------------------------------------------
