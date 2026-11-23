@@ -886,28 +886,21 @@ Read Traefik migration notes before major jumps (v2 → v3, etc.). This repo tar
 ### Gate GUI / repo
 
 `/opt/gate` is owned by `gate`. Pull as that user (root gets `fatal: detected dubious ownership`).
-
-Inside the CT:
-
-```bash
-cd /opt/gate
-runuser -u gate -- git pull origin main
-runuser -u gate -- /opt/gate/.venv/bin/pip install -r gui/requirements.txt
-systemctl restart gate-admin
-# Traefik hot-reloads YAML; restart Traefik only if traefik.yml static bits changed
-systemctl restart traefik
-```
-
-From the Proxmox host:
+Install/`sed` edits to `gate.yml` / `pve.yml` also block a plain `git pull`
+(“local changes would be overwritten”) — use the update script:
 
 ```bash
 pct exec 103 -- bash -lc '
-  runuser -u gate -- git -C /opt/gate pull origin main
-  runuser -u gate -- /opt/gate/.venv/bin/pip install -r /opt/gate/gui/requirements.txt
-  sed -i "/admin-allowlist/d" /opt/gate/config/dynamic/apps/gate.yml
-  systemctl restart gate-admin
+  # first time only if update-gate.sh is not on disk yet:
+  runuser -u gate -- git -C /opt/gate checkout -- config/dynamic/apps/gate.yml
+  runuser -u gate -- git -C /opt/gate pull --ff-only origin main
+  bash /opt/gate/scripts/update-gate.sh
 '
 ```
+
+`update-gate.sh` resets template route files, pulls `main`, re-applies
+`DOMAIN` from `config/base.env`, reinstalls GUI deps, disables Gate
+`admin-allowlist`, and restarts Traefik.
 
 ---
 
