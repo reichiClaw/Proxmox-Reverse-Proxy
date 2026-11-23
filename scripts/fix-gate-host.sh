@@ -23,41 +23,79 @@ if [[ -f /opt/gate/config/base.env ]]; then
   fi
 fi
 
-for f in /opt/gate/config/dynamic/apps/gate.yml \
-         /opt/gate/config/dynamic/apps/whoami.yml \
-         /opt/gate/config/dynamic/pve.yml; do
-  [[ -f $f ]] || continue
-  # Replace any Host(`….something`) subdomain prefix we care about.
+rewrite_hosts() {
+  local f=$1
+  [[ -f $f ]] || return 0
+  local base name
   base=$(basename "$f" .yml)
   case $base in
     gate) name=gate ;;
     whoami) name=whoami ;;
     pve) name=pve ;;
-    *) continue ;;
+    *) return 0 ;;
   esac
   sed -i -E "s|Host\(\`${name}\.[^\`]+\`\)|Host(\`${name}.${DOMAIN}\`)|g" "$f"
-  # Fallback: any leftover example.com
   sed -i "s/example\.com/${DOMAIN}/g" "$f"
   echo "-- $f --"
   grep -n 'Host(' "$f" || true
+}
+
+echo "== dynamic provider path =="
+ls -la /etc/traefik/dynamic /etc/traefik/dynamic/apps 2>/dev/null || true
+if [[ -L /etc/traefik/dynamic ]]; then
+  echo "OK: /etc/traefik/dynamic -> $(readlink /etc/traefik/dynamic)"
+elif [[ -d /etc/traefik/dynamic ]]; then
+  echo "WARN: /etc/traefik/dynamic is a real directory (not a symlink)."
+  echo "      Edits under /opt/gate/config/dynamic may NOT reach Traefik."
+fi
+
+for f in /opt/gate/config/dynamic/apps/gate.yml \
+         /opt/gate/config/dynamic/apps/whoami.yml \
+         /opt/gate/config/dynamic/pve.yml; do
+  rewrite_hosts "$f"
 done
 
+# If Traefik uses a separate copy, rewrite that too.
+if [[ -d /etc/traefik/dynamic/apps ]] && [[ ! /etc/traefik/dynamic -ef /opt/gate/config/dynamic ]]; then
+  echo "NOTE: syncing Host() into /etc/traefik/dynamic/apps (not the same tree as the repo)"
+  for f in /etc/traefik/dynamic/apps/gate.yml \
+           /etc/traefik/dynamic/apps/whoami.yml \
+           /etc/traefik/dynamic/pve.yml; do
+    rewrite_hosts "$f"
+  done
+fi
+
 systemctl restart gate-admin
-# Traefik watches dynamic files; bounce it so a bad prior state is cleared.
 systemctl restart traefik
-sleep 1
+sleep 2
 
 echo "== gate-admin =="
 systemctl is-active gate-admin
 curl -sS -o /dev/null -w "local /login -> %{http_code}\n" http://127.0.0.1:8080/login || true
 
-echo "== traefik Host gate.${DOMAIN} =="
-curl -skS -o /tmp/gate-host.body -w "%{http_code} ctype=%{content_type}\n" \
-  -H "Host: gate.${DOMAIN}" https://127.0.0.1/ || true
-code=$(curl -skS -o /dev/null -w "%{http_code}" -H "Host: gate.${DOMAIN}" https://127.0.0.1/ || true)
+# sniStrict requires the real hostname in SNI — use --resolve, not Host: on 127.0.0.1
+echo "== traefik https://gate.${DOMAIN}/ (SNI via --resolve) =="
+code=$(curl -skS -o /tmp/gate-host.body -w "%{http_code}" \
+  --resolve "gate.${DOMAIN}:443:127.0.0.1" \
+  "https://gate.${DOMAIN}/" || echo "err")
+ctype=$(curl -skS -o /dev/null -w "%{content_type}" \
+  --resolve "gate.${DOMAIN}:443:127.0.0.1" \
+  "https://gate.${DOMAIN}/" 2>/dev/null || true)
+echo "HTTP ${code} ctype=${ctype}"
+head -c 200 /tmp/gate-host.body 2>/dev/null; echo
+
 if [[ $code == 404 ]]; then
-  echo "Still 404 — Traefik routers:"
-  journalctl -u traefik -n 40 --no-pager | tail -40
+  echo "STILL 404 — dump routers Traefik loaded and recent errors:"
+  echo "-- gate.yml (repo) --"; cat /opt/gate/config/dynamic/apps/gate.yml
+  if [[ -f /etc/traefik/dynamic/apps/gate.yml ]]; then
+    echo "-- gate.yml (etc) --"; cat /etc/traefik/dynamic/apps/gate.yml
+  fi
+  journalctl -u traefik -n 50 --no-pager | grep -iE 'error|gate|404|acme' || journalctl -u traefik -n 30 --no-pager
   exit 1
 fi
-echo "OK — try https://gate.${DOMAIN}/ (expect setup/login redirect, not 404)."
+if [[ $code == err || $code == 000 ]]; then
+  echo "TLS/connect failed. ACME may still be issuing. Check:"
+  echo "  journalctl -u traefik -n 80 --no-pager | grep -i acme"
+  exit 1
+fi
+echo "OK — try https://gate.${DOMAIN}/ (expect setup/login, not 404)."
