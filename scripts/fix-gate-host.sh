@@ -14,6 +14,21 @@ if [[ -z ${DOMAIN:-} ]]; then
   exit 1
 fi
 
+# Always ensure error-pages exists first — gate router is rejected without it.
+# Do this before any git pull so a dirty gate.yml cannot block the fix.
+mkdir -p /opt/gate/config/dynamic
+cat >/opt/gate/config/dynamic/error-pages.yml <<'EOF'
+# Shared Traefik service used by the gate-errors middleware (403 HTML).
+http:
+  services:
+    gate-error-pages:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:8080"
+EOF
+chown gate:gate /opt/gate/config/dynamic/error-pages.yml 2>/dev/null || true
+echo "Ensured config/dynamic/error-pages.yml"
+
 # Keep base.env in sync so future update-gate.sh runs stay correct.
 if [[ -f /opt/gate/config/base.env ]]; then
   if grep -qE '^DOMAIN=' /opt/gate/config/base.env; then
@@ -63,20 +78,6 @@ if [[ -d /etc/traefik/dynamic/apps ]] && [[ ! /etc/traefik/dynamic -ef /opt/gate
            /etc/traefik/dynamic/pve.yml; do
     rewrite_hosts "$f"
   done
-fi
-
-# Ensure error-pages service exists (gate-errors middleware needs it).
-if [[ ! -f /opt/gate/config/dynamic/error-pages.yml ]]; then
-  cat >/opt/gate/config/dynamic/error-pages.yml <<'EOF'
-http:
-  services:
-    gate-error-pages:
-      loadBalancer:
-        servers:
-          - url: "http://127.0.0.1:8080"
-EOF
-  chown gate:gate /opt/gate/config/dynamic/error-pages.yml 2>/dev/null || true
-  echo "Wrote missing config/dynamic/error-pages.yml"
 fi
 
 systemctl restart gate-admin
