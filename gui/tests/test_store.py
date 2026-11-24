@@ -82,6 +82,21 @@ class TestValidateDomain:
             store.validate_domain(bad)
 
 
+class TestValidateRoutePath:
+    @pytest.mark.parametrize("ok", ["", "/", "/webhook", "/api/v1", "/a-b_c~1"])
+    def test_accepts(self, ok):
+        out = store.validate_route_path(ok)
+        if ok in ("", "/"):
+            assert out == ""
+        else:
+            assert out.startswith("/")
+
+    @pytest.mark.parametrize("bad", ["/../etc", "/x y", "/x`y", "/x\"y", "//x"])
+    def test_rejects(self, bad):
+        with pytest.raises(ValueError):
+            store.validate_route_path(bad)
+
+
 class TestServices:
     def test_create_and_delete(self):
         svc = store.create_service("gitea", "http://10.0.0.5:3000")
@@ -94,6 +109,27 @@ class TestServices:
 
         store.delete_service("gitea")
         assert not path.exists()
+
+    def test_path_route_on_shared_host(self):
+        store.create_service("gotify", "http://10.2.0.6:8680")
+        svc = store.create_service(
+            "gotify-webhook",
+            "http://10.2.0.6:8682/webhook",
+            subdomain="gotify",
+            route_path="/webhook",
+        )
+        assert svc.host == "gotify.test.example.com"
+        assert svc.route_path == "/webhook"
+        assert svc.public_url == "https://gotify.test.example.com/webhook"
+        content = (APPS_DIR / "gotify-webhook.yml").read_text()
+        assert "PathPrefix(`/webhook`)" in content
+        assert "Host(`gotify.test.example.com`)" in content
+        assert f"priority: {store.PATH_ROUTE_PRIORITY}" in content
+        # Round-trip parse
+        parsed = store.get_service("gotify-webhook")
+        assert parsed is not None
+        assert parsed.route_path == "/webhook"
+        assert parsed.subdomain == "gotify"
 
     def test_duplicate_create_rejected(self):
         store.create_service("gitea", "http://10.0.0.5:3000")

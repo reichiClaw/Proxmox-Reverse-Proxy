@@ -5,9 +5,9 @@
     <h1>{% if mode == 'create' %}Add service{% else %}Edit {{ service.name }}{% endif %}</h1>
     <p class="lede">
       {% if mode == 'create' %}
-      Creates <code>&lt;name&gt;.{{ settings.domain }}</code> with an automatic TLS certificate.
+      Creates a TLS route. Leave path empty for a whole subdomain, or set a path to share a host with another backend.
       {% else %}
-      Updates the Traefik drop-in for this subdomain.
+      Updates the Traefik drop-in for this route.
       {% endif %}
     </p>
   </div>
@@ -16,16 +16,25 @@
 <form method="post" class="form-grid">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
   <label>
-    <span>Name (subdomain label)</span>
+    <span>Name (route id)</span>
     {% if mode == 'create' %}
-    <input name="name" placeholder="gitea" pattern="[a-z0-9]([-a-z0-9]*[a-z0-9])?" data-host-preview="{{ settings.domain }}" required autofocus />
+    <input name="name" id="name-input" placeholder="gotify-webhook" pattern="[a-z0-9]([-a-z0-9]*[a-z0-9])?" required autofocus />
     {% else %}
-    <input name="new_name" value="{{ service.name }}" pattern="[a-z0-9]([-a-z0-9]*[a-z0-9])?" data-host-preview="{{ service.domain or settings.domain }}" {% if service.source == 'system' %}readonly{% endif %} required autofocus />
+    <input name="new_name" id="name-input" value="{{ service.name }}" pattern="[a-z0-9]([-a-z0-9]*[a-z0-9])?" {% if service.source == 'system' %}readonly{% endif %} required autofocus />
     {% endif %}
-    <small>Public host: <code id="host-preview">{% if service %}{{ service.host }}{% else %}name.{{ settings.domain }}{% endif %}</code></small>
+    <small>Unique id and YAML filename. Usually matches the subdomain.</small>
   </label>
 
   {% if service is none or service.source != 'system' %}
+  <label>
+    <span>Subdomain label</span>
+    <input name="subdomain" id="subdomain-input" pattern="[a-z0-9]([-a-z0-9]*[a-z0-9])?"
+           value="{{ service.subdomain if service else '' }}"
+           placeholder="same as name"
+           data-host-preview="{{ (service.domain if service else settings.domain) }}" />
+    <small>DNS label for the public host. Set to another app’s name (e.g. <code>gotify</code>) when this route is only a path on that host.</small>
+  </label>
+
   <label>
     <span>Domain</span>
     <select name="domain" id="domain-select">
@@ -39,12 +48,24 @@
     </select>
     <small>Add more domains under Settings. With Cloudflare configured, the CNAME is created automatically.</small>
   </label>
+
+  <label>
+    <span>Path prefix (optional)</span>
+    <input name="route_path" id="path-input" value="{{ service.route_path if service else '' }}"
+           placeholder="/webhook" pattern="/[A-Za-z0-9._~%/-]*" />
+    <small>Leave blank for the whole host. Example: <code>/webhook</code> → only that path goes to this upstream (higher Traefik priority).</small>
+  </label>
   {% endif %}
+
+  <label>
+    <span>Public URL</span>
+    <code id="host-preview">{% if service %}{{ service.public_url }}{% else %}https://name.{{ settings.domain }}{% endif %}</code>
+  </label>
 
   <label>
     <span>Upstream URL</span>
     <input name="upstream" type="url" placeholder="http://10.10.10.20:3000" value="{{ service.upstream if service else '' }}" required />
-    <small>Reachable from the Traefik LXC on the services network.</small>
+    <small>Reachable from the Traefik LXC on the services network. May include a path (e.g. <code>http://10.2.0.6:8682/webhook</code>).</small>
   </label>
 
   <div class="form-actions">

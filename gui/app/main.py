@@ -382,6 +382,8 @@ async def services_create(
     name: Annotated[str, Form()] = "",
     upstream: Annotated[str, Form()] = "",
     domain: Annotated[str, Form()] = "",
+    subdomain: Annotated[str, Form()] = "",
+    route_path: Annotated[str, Form()] = "",
     csrf_token: Annotated[str, Form()] = "",
 ):
     if redir := _require_login(request):
@@ -389,11 +391,22 @@ async def services_create(
     if not _check_csrf(request, csrf_token):
         return _csrf_reject(request, "/services/new")
     try:
-        svc = create_service(name, upstream, domain=domain or None)
+        svc = create_service(
+            name,
+            upstream,
+            domain=domain or None,
+            subdomain=subdomain or None,
+            route_path=route_path,
+        )
     except ValueError as exc:
         _flash(request, str(exc), "error")
         return RedirectResponse("/services/new", status_code=303)
-    logger.info("Service created (name=%s, upstream=%s)", svc.name, svc.upstream)
+    logger.info(
+        "Service created (name=%s, url=%s, upstream=%s)",
+        svc.name,
+        svc.public_url,
+        svc.upstream,
+    )
     dns_note = _dns_ensure(svc.host)
     _flash(request, f"Added {svc.public_url} — certificate will be issued automatically.{dns_note}")
     return RedirectResponse("/services", status_code=303)
@@ -421,6 +434,8 @@ async def services_update(
     upstream: Annotated[str, Form()] = "",
     new_name: Annotated[str, Form()] = "",
     domain: Annotated[str, Form()] = "",
+    subdomain: Annotated[str, Form()] = "",
+    route_path: Annotated[str, Form()] = "",
     csrf_token: Annotated[str, Form()] = "",
 ):
     if redir := _require_login(request):
@@ -431,12 +446,22 @@ async def services_update(
     old_host = old.host if old else ""
     try:
         svc = update_service(
-            name, upstream=upstream, new_name=new_name or None, domain=domain or None
+            name,
+            upstream=upstream,
+            new_name=new_name or None,
+            domain=domain or None,
+            subdomain=subdomain or None,
+            route_path=route_path,
         )
     except ValueError as exc:
         _flash(request, str(exc), "error")
         return RedirectResponse(f"/services/{name}/edit", status_code=303)
-    logger.info("Service updated (name=%s, upstream=%s)", svc.name, svc.upstream)
+    logger.info(
+        "Service updated (name=%s, url=%s, upstream=%s)",
+        svc.name,
+        svc.public_url,
+        svc.upstream,
+    )
     dns_note = ""
     if svc.host != old_host:
         dns_note = _dns_ensure(svc.host)

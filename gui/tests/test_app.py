@@ -149,6 +149,34 @@ class TestServiceCrud:
         client.post("/services/gitea/delete", data={"csrf_token": token})
         assert not (APPS_DIR / "gitea.yml").exists()
 
+    def test_create_path_based_route(self, client):
+        do_setup(client)
+        token = get_csrf(client, "/services/new")
+        client.post(
+            "/services/new",
+            data={
+                "name": "gotify",
+                "upstream": "http://10.2.0.6:8680",
+                "csrf_token": token,
+            },
+        )
+        token = get_csrf(client, "/services/new")
+        client.post(
+            "/services/new",
+            data={
+                "name": "gotify-webhook",
+                "subdomain": "gotify",
+                "route_path": "/webhook",
+                "upstream": "http://10.2.0.6:8682/webhook",
+                "csrf_token": token,
+            },
+        )
+        content = (APPS_DIR / "gotify-webhook.yml").read_text()
+        assert "PathPrefix(`/webhook`)" in content
+        assert "Host(`gotify.test.example.com`)" in content
+        page = client.get("/services")
+        assert "gotify.test.example.com/webhook" in page.text
+
     def test_create_rejects_bad_upstream(self, client):
         do_setup(client)
         token = get_csrf(client, "/services/new")

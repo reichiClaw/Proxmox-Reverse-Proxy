@@ -9,17 +9,33 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
-  const input = document.querySelector("input[data-host-preview]");
+  const nameInput = document.getElementById("name-input");
+  const subdomainInput = document.getElementById("subdomain-input");
+  const pathInput = document.getElementById("path-input");
   const preview = document.getElementById("host-preview");
   const domainSelect = document.getElementById("domain-select");
-  if (input && preview) {
+  if (preview && (nameInput || subdomainInput)) {
     const sync = () => {
-      const value = (input.value || "name").toLowerCase();
-      const domain = domainSelect ? domainSelect.value : input.dataset.hostPreview;
-      preview.textContent = value + "." + domain;
+      const name = (nameInput && nameInput.value ? nameInput.value : "name").toLowerCase();
+      const label = (
+        subdomainInput && subdomainInput.value.trim()
+          ? subdomainInput.value
+          : name
+      ).toLowerCase();
+      const domain = domainSelect
+        ? domainSelect.value
+        : (subdomainInput && subdomainInput.dataset.hostPreview) || "example.com";
+      let path = pathInput ? pathInput.value.trim() : "";
+      if (path && !path.startsWith("/")) path = "/" + path;
+      if (path.length > 1) path = path.replace(/\/+$/, "");
+      preview.textContent = "https://" + label + "." + domain + path;
     };
-    input.addEventListener("input", sync);
-    if (domainSelect) domainSelect.addEventListener("change", sync);
+    [nameInput, subdomainInput, pathInput, domainSelect].forEach((el) => {
+      if (el) {
+        el.addEventListener("input", sync);
+        el.addEventListener("change", sync);
+      }
+    });
     sync();
   }
 });

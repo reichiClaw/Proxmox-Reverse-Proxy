@@ -3,7 +3,7 @@
 <section class="page-head">
   <div>
     <h1>Services</h1>
-    <p class="lede">Each row is a subdomain on <code>{{ settings.domain }}</code>. Certificates are issued and renewed by Traefik ACME.</p>
+    <p class="lede">Host and optional path routes on your domains. Certificates are issued and renewed by Traefik ACME.</p>
   </div>
   <a class="btn primary" href="/services/new">Add service</a>
 </section>
@@ -12,7 +12,7 @@
 <table class="svc-table">
   <thead>
     <tr>
-      <th>Subdomain</th>
+      <th>Public URL</th>
       <th>Upstream</th>
       <th>Kind</th>
       <th></th>
@@ -22,8 +22,8 @@
     {% for s in services %}
     <tr>
       <td>
-        <a class="host" href="{{ s.public_url }}" target="_blank" rel="noopener">{{ s.host }}</a>
-        <div class="muted name">{{ s.name }}</div>
+        <a class="host" href="{{ s.public_url }}" target="_blank" rel="noopener">{{ s.public_url.replace('https://', '') }}</a>
+        <div class="muted name">{{ s.name }}{% if s.route_path %} · path{% endif %}</div>
       </td>
       <td><code class="upstream">{{ s.upstream }}</code></td>
       <td><span class="tag {{ s.source }}">{{ s.source }}</span></td>

@@ -31,8 +31,13 @@ MIDDLEWARE_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 UPSTREAM_HOST_RE = re.compile(r"^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$")
 UPSTREAM_IPV6_RE = re.compile(r"^[0-9a-f:]+$")
 UPSTREAM_PATH_RE = re.compile(r"^/[A-Za-z0-9._~%/-]*$")
+# Public path prefix on the Host (PathPrefix). Empty = whole host.
+ROUTE_PATH_RE = re.compile(r"^(/[A-Za-z0-9._~%-]+)+/?$")
 HOST_RE = re.compile(r"Host\(`([^`]+)`\)")
+PATH_PREFIX_RE = re.compile(r"PathPrefix\(`([^`]+)`\)")
 RESERVED_NAMES = {"_template", "admin", "gate", "traefik"}
+# Path-based routers need higher priority than the catch-all Host() sibling.
+PATH_ROUTE_PRIORITY = 100
 
 STAGING_CA = "https://acme-staging-v02.api.letsencrypt.org/directory"
 PROD_CA = "https://acme-v02.api.letsencrypt.org/directory"
@@ -47,10 +52,22 @@ class Service:
     source: str = "app"  # app | system
     path: Path | None = None
     tls: bool = True
+    # URL path prefix (e.g. "/webhook"); empty means the whole host.
+    route_path: str = ""
+    # First DNS label of the public host; defaults to ``name``.
+    # Set differently to attach a path route onto another service's host
+    # (e.g. name=gotify-webhook, subdomain=gotify, route_path=/webhook).
+    subdomain: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.subdomain and self.host:
+            self.subdomain = self.host.split(".", 1)[0]
 
     @property
     def public_url(self) -> str:
-        return f"https://{self.host}" if self.host else ""
+        if not self.host:
+            return ""
+        return f"https://{self.host}{self.route_path}"
 
     @property
     def domain(self) -> str:
@@ -292,6 +309,30 @@ def validate_middlewares(middlewares: list[str]) -> list[str]:
     return list(middlewares)
 
 
+def validate_route_path(route_path: str) -> str:
+    """Normalize an optional public path prefix (empty = whole host)."""
+    route_path = (route_path or "").strip()
+    if not route_path or route_path == "/":
+        return ""
+    if ".." in route_path or "`" in route_path or '"' in route_path:
+        raise ValueError("Path prefix contains unsupported characters.")
+    if not route_path.startswith("/"):
+        route_path = "/" + route_path
+    # Drop trailing slash except we never keep bare "/"
+    if len(route_path) > 1:
+        route_path = route_path.rstrip("/")
+    if not ROUTE_PATH_RE.match(route_path):
+        raise ValueError(
+            "Path prefix must look like /webhook or /api/v1 (letters, digits, ._-~%)."
+        )
+    return route_path
+
+
+def validate_subdomain(subdomain: str, *, fallback: str) -> str:
+    label = (subdomain or "").strip().lower() or fallback
+    return validate_name(label)
+
+
 def _parse_service_doc(path: Path, source: str) -> Service | None:
     if path.name.startswith("_") or path.suffix not in {".yml", ".yaml"}:
         return None
@@ -310,6 +351,8 @@ def _parse_service_doc(path: Path, source: str) -> Service | None:
     rule = router.get("rule") or ""
     host_match = HOST_RE.search(rule)
     host = host_match.group(1) if host_match else ""
+    path_match = PATH_PREFIX_RE.search(rule)
+    route_path = path_match.group(1) if path_match else ""
 
     service_name = router.get("service") or router_name
     svc = services.get(service_name) or {}
@@ -319,6 +362,7 @@ def _parse_service_doc(path: Path, source: str) -> Service | None:
     tls = bool(router.get("tls"))
 
     name = stem if source == "app" else router_name
+    subdomain = host.split(".", 1)[0] if host else name
     return Service(
         name=name,
         host=host,
@@ -327,6 +371,8 @@ def _parse_service_doc(path: Path, source: str) -> Service | None:
         source=source,
         path=path,
         tls=tls,
+        route_path=route_path,
+        subdomain=subdomain,
     )
 
 
@@ -353,7 +399,15 @@ def get_service(name: str) -> Service | None:
     return None
 
 
-def _render_app_yaml(name: str, domain: str, upstream: str, middlewares: list[str] | None = None) -> str:
+def _render_app_yaml(
+    name: str,
+    domain: str,
+    upstream: str,
+    middlewares: list[str] | None = None,
+    *,
+    subdomain: str | None = None,
+    route_path: str = "",
+) -> str:
     mws = validate_middlewares(middlewares or ["secured"])
     # Gate admin UI must keep edge middlewares even if a stale parse dropped them.
     if name == "gate":
@@ -362,16 +416,27 @@ def _render_app_yaml(name: str, domain: str, upstream: str, middlewares: list[st
             if mw not in mws:
                 mws.append(mw)
     mw_yaml = "\n".join(f"        - {m}" for m in mws)
-    host = f"{name}.{domain}"
+    label = validate_subdomain(subdomain or name, fallback=name)
+    route_path = validate_route_path(route_path)
+    host = f"{label}.{domain}"
+    if route_path:
+        rule = f"Host(`{host}`) && PathPrefix(`{route_path}`)"
+        priority_yaml = f"      priority: {PATH_ROUTE_PRIORITY}\n"
+        public = f"https://{host}{route_path}"
+    else:
+        rule = f"Host(`{host}`)"
+        priority_yaml = ""
+        public = f"https://{host}"
     return (
         f"# Managed by Gate admin GUI\n"
-        f"# https://{host}  →  {upstream}\n"
+        f"# {public}  →  {upstream}\n"
         f"# Certificate: automatic via Traefik ACME (certResolver: le)\n"
         f"\n"
         f"http:\n"
         f"  routers:\n"
         f"    {name}:\n"
-        f"      rule: \"Host(`{host}`)\"\n"
+        f"      rule: \"{rule}\"\n"
+        f"{priority_yaml}"
         f"      entryPoints:\n"
         f"        - websecure\n"
         f"      tls:\n"
@@ -404,9 +469,18 @@ def _resolve_domain(settings: Settings, domain: str | None, current: str = "") -
     return chosen
 
 
-def create_service(name: str, upstream: str, domain: str | None = None) -> Service:
+def create_service(
+    name: str,
+    upstream: str,
+    domain: str | None = None,
+    *,
+    subdomain: str | None = None,
+    route_path: str = "",
+) -> Service:
     name = validate_name(name)
     upstream = validate_upstream(upstream)
+    route_path = validate_route_path(route_path)
+    label = validate_subdomain(subdomain or name, fallback=name)
     settings = load_settings()
     chosen_domain = _resolve_domain(settings, domain)
     APPS_DIR.mkdir(parents=True, exist_ok=True)
@@ -414,7 +488,13 @@ def create_service(name: str, upstream: str, domain: str | None = None) -> Servi
     if path.exists():
         raise ValueError(f"Service '{name}' already exists.")
     path.write_text(
-        _render_app_yaml(name, chosen_domain, upstream),
+        _render_app_yaml(
+            name,
+            chosen_domain,
+            upstream,
+            subdomain=label,
+            route_path=route_path,
+        ),
         encoding="utf-8",
     )
     svc = get_service(name)
@@ -428,6 +508,8 @@ def update_service(
     upstream: str | None = None,
     new_name: str | None = None,
     domain: str | None = None,
+    subdomain: str | None = None,
+    route_path: str | None = None,
 ) -> Service:
     svc = get_service(name)
     if svc is None:
@@ -440,11 +522,27 @@ def update_service(
     chosen_domain = _resolve_domain(settings, domain, current=svc.domain)
     target_name = validate_name(new_name) if new_name and new_name != name else name
     new_path = APPS_DIR / f"{target_name}.yml"
+    label = validate_subdomain(
+        subdomain if subdomain is not None else (svc.subdomain or target_name),
+        fallback=target_name,
+    )
+    path_prefix = (
+        validate_route_path(route_path)
+        if route_path is not None
+        else svc.route_path
+    )
 
     if target_name != name and new_path.exists():
         raise ValueError(f"Service '{target_name}' already exists.")
 
-    content = _render_app_yaml(target_name, chosen_domain, upstream, svc.middlewares)
+    content = _render_app_yaml(
+        target_name,
+        chosen_domain,
+        upstream,
+        svc.middlewares,
+        subdomain=label,
+        route_path=path_prefix,
+    )
     new_path.write_text(content, encoding="utf-8")
     if target_name != name and svc.path and svc.path.exists():
         svc.path.unlink()
