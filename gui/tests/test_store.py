@@ -131,6 +131,11 @@ class TestServices:
         assert parsed.route_path == "/webhook"
         assert parsed.subdomain == "gotify"
 
+    def test_route_files_are_world_readable(self):
+        store.create_service("readable", "http://10.0.0.5:80")
+        mode = (APPS_DIR / "readable.yml").stat().st_mode & 0o777
+        assert mode == 0o644
+
     def test_duplicate_create_rejected(self):
         store.create_service("gitea", "http://10.0.0.5:3000")
         with pytest.raises(ValueError):

@@ -333,6 +333,18 @@ def validate_subdomain(subdomain: str, *, fallback: str) -> str:
     return validate_name(label)
 
 
+def _write_route_yaml(path: Path, content: str) -> None:
+    """Write a Traefik route file and make it world-readable.
+
+    gate-admin runs with UMask=0077 (secrets stay 0600), but Traefik must be
+    able to read every apps/*.yml — a single 0600 file makes the whole apps/
+    provider fail with \"permission denied\" and no new ACME certs are issued.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    os.chmod(path, 0o644)
+
+
 def _parse_service_doc(path: Path, source: str) -> Service | None:
     if path.name.startswith("_") or path.suffix not in {".yml", ".yaml"}:
         return None
@@ -487,7 +499,8 @@ def create_service(
     path = APPS_DIR / f"{name}.yml"
     if path.exists():
         raise ValueError(f"Service '{name}' already exists.")
-    path.write_text(
+    _write_route_yaml(
+        path,
         _render_app_yaml(
             name,
             chosen_domain,
@@ -495,7 +508,6 @@ def create_service(
             subdomain=label,
             route_path=route_path,
         ),
-        encoding="utf-8",
     )
     svc = get_service(name)
     assert svc is not None
@@ -543,7 +555,7 @@ def update_service(
         subdomain=label,
         route_path=path_prefix,
     )
-    new_path.write_text(content, encoding="utf-8")
+    _write_route_yaml(new_path, content)
     if target_name != name and svc.path and svc.path.exists():
         svc.path.unlink()
     out = get_service(target_name)
@@ -570,9 +582,9 @@ def update_system_service(name: str, *, upstream: str | None = None) -> Service:
         servers[0]["url"] = upstream
     else:
         servers.append({"url": upstream})
-    svc.path.write_text(
+    _write_route_yaml(
+        svc.path,
         yaml.safe_dump(doc, sort_keys=False, default_flow_style=False),
-        encoding="utf-8",
     )
     out = get_service(name)
     assert out is not None
@@ -594,7 +606,7 @@ def _rewrite_host_in_file(path: Path, old_domain: str, new_domain: str) -> None:
     updated = text.replace(f".{old_domain}", f".{new_domain}")
     # Also rewrite Host(`old`) if someone used bare domain equals
     if updated != text:
-        path.write_text(updated, encoding="utf-8")
+        _write_route_yaml(path, updated)
         return
     # YAML-safe path: parse and rewrite Host rules
     with path.open(encoding="utf-8") as fh:
@@ -615,9 +627,9 @@ def _rewrite_host_in_file(path: Path, old_domain: str, new_domain: str) -> None:
             router["rule"] = f"Host(`{new_domain}`)"
             changed = True
     if changed:
-        path.write_text(
+        _write_route_yaml(
+            path,
             yaml.safe_dump(doc, sort_keys=False, default_flow_style=False),
-            encoding="utf-8",
         )
 
 
