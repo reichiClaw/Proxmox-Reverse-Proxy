@@ -3,30 +3,68 @@
 <section class="page-head">
   <div>
     <h1>Services</h1>
-    <p class="lede">Host and optional path routes on your domains. Certificates are issued and renewed by Traefik ACME.</p>
+    <p class="lede">Host and optional path routes. Status shows saved config vs Traefik’s active runtime.</p>
   </div>
   <a class="btn primary" href="/services/new">Add service</a>
 </section>
 
-{% if services %}
+{% if not runtime_ok %}
+<div class="flash error" role="status">
+  Traefik runtime status unknown{% if runtime_error %}: {{ runtime_error }}{% endif %}.
+  Ensure the local API listens on <code>127.0.0.1:8090</code> (restart Traefik after updating <code>traefik.yml</code>).
+</div>
+{% endif %}
+
+{% if provider_errors %}
+<div class="flash error" role="status">
+  <strong>Traefik provider/router errors</strong>
+  <ul class="compact">
+    {% for e in provider_errors %}
+    <li><code>{{ e }}</code></li>
+    {% endfor %}
+  </ul>
+  A single unreadable file under <code>apps/</code> can block other services from becoming active.
+</div>
+{% endif %}
+
+{% if rows %}
 <table class="svc-table">
   <thead>
     <tr>
       <th>Public URL</th>
-      <th>Upstream</th>
-      <th>Kind</th>
+      <th>Saved → Active</th>
+      <th>Status</th>
       <th></th>
     </tr>
   </thead>
   <tbody>
-    {% for s in services %}
+    {% for row in rows %}
+    {% set s = row.service %}
     <tr>
       <td>
         <a class="host" href="{{ s.public_url }}" target="_blank" rel="noopener">{{ s.public_url.replace('https://', '') }}</a>
-        <div class="muted name">{{ s.name }}{% if s.route_path %} · path{% endif %}</div>
+        <div class="muted name">{{ s.name }} · {{ s.source }}{% if s.route_path %} · path{% endif %}</div>
       </td>
-      <td><code class="upstream">{{ s.upstream }}</code></td>
-      <td><span class="tag {{ s.source }}">{{ s.source }}</span></td>
+      <td>
+        <code class="upstream">{{ s.upstream }}</code>
+        {% if row.active_upstream and row.active_upstream != s.upstream %}
+        <div class="status-mismatch">active: <code>{{ row.active_upstream }}</code></div>
+        {% elif row.active_upstream %}
+        <div class="muted">active matches</div>
+        {% else %}
+        <div class="muted">active: unknown</div>
+        {% endif %}
+      </td>
+      <td>
+        <div class="status-pills">
+          <span class="pill {% if row.saved_at %}ok{% else %}unknown{% endif %}" title="{{ row.saved_at or 'never' }}">Saved</span>
+          <span class="pill {% if row.active_matched == true %}ok{% elif row.active_matched == false %}bad{% else %}unknown{% endif %}" title="{{ row.active_at or 'unknown' }}">Active</span>
+          <span class="pill {% if row.last_direct and row.last_direct.ok %}ok{% elif row.checked_at %}bad{% else %}unknown{% endif %}" title="{{ row.checked_at or 'never' }}">Checked</span>
+        </div>
+        {% if row.active_error or row.publish_error %}
+        <div class="status-mismatch">{{ row.active_error or row.publish_error }}</div>
+        {% endif %}
+      </td>
       <td class="actions">
         <a class="btn ghost" href="/services/{{ s.name }}/edit">Edit</a>
         {% if s.source != 'system' %}

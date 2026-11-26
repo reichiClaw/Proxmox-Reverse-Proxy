@@ -13,10 +13,13 @@ from .paths import (
     APPS_DIR,
     BASE_ENV,
     BASE_ENV_EXAMPLE,
+    DYNAMIC_DIR,
     PVE_YML,
+    REVISION_YML,
     SETTINGS_FILE,
     TRAEFIK_YML,
 )
+from . import statusstore
 
 # Values written into Traefik YAML or Host(`...`) rules are validated against
 # strict allowlists. This is the barrier that keeps an authenticated GUI admin
@@ -333,16 +336,107 @@ def validate_subdomain(subdomain: str, *, fallback: str) -> str:
     return validate_name(label)
 
 
-def _write_route_yaml(path: Path, content: str) -> None:
-    """Write a Traefik route file and make it world-readable.
+def list_unreadable_dynamic() -> list[str]:
+    """Return relative paths of dynamic YAML that are not world-readable."""
+    bad: list[str] = []
+    roots = [DYNAMIC_DIR]
+    if APPS_DIR.exists():
+        roots.append(APPS_DIR)
+    for root in roots:
+        if not root.exists():
+            continue
+        for path in sorted(root.glob("*.yml")):
+            try:
+                mode = path.stat().st_mode & 0o777
+            except OSError as exc:
+                bad.append(f"{path.name} ({exc})")
+                continue
+            # Traefik must read every sibling; 0600 blocked reload historically.
+            if mode & 0o004 == 0:
+                try:
+                    rel = str(path.relative_to(DYNAMIC_DIR))
+                except ValueError:
+                    rel = path.name
+                bad.append(f"{rel} mode={oct(mode)}")
+    return bad
+
+
+def ensure_dynamic_readable() -> list[str]:
+    """Fix unreadable Traefik dynamic YAML before publish (returns fixed paths)."""
+    fixed: list[str] = []
+    roots = [DYNAMIC_DIR]
+    if APPS_DIR.exists():
+        roots.append(APPS_DIR)
+    for root in roots:
+        if not root.exists():
+            continue
+        try:
+            os.chmod(root, 0o755)
+        except OSError:
+            pass
+        for path in root.glob("*.yml"):
+            try:
+                mode = path.stat().st_mode & 0o777
+                # Traefik (even as root under some sandboxing) failed on 0600
+                # gate:gate files — keep route YAML world-readable.
+                if mode != 0o644:
+                    os.chmod(path, 0o644)
+                    fixed.append(str(path))
+            except OSError:
+                continue
+    return fixed
+
+
+def bump_traefik_revision(reason: str = "") -> None:
+    """Touch a top-level watched file so Traefik reloads nested apps/ changes.
+
+    Traefik's file provider has repeatedly kept a stale in-memory config when
+    only a nested apps/*.yml changed after a prior permission error. Updating
+    this top-level sentinel forces a successful watcher callback.
+    """
+    DYNAMIC_DIR.mkdir(parents=True, exist_ok=True)
+    from datetime import datetime, timezone
+
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    body = (
+        "# Auto-updated by Gate admin — do not edit.\n"
+        "# Forces Traefik file-provider reload after nested config publishes.\n"
+        f"# revised: {stamp}\n"
+        f"# reason: {reason or 'publish'}\n"
+        "http: {}\n"
+    )
+    tmp = REVISION_YML.with_suffix(".yml.tmp")
+    tmp.write_text(body, encoding="utf-8")
+    os.chmod(tmp, 0o644)
+    tmp.replace(REVISION_YML)
+    os.chmod(REVISION_YML, 0o644)
+
+
+def _write_route_yaml(path: Path, content: str, *, backup: bool = True) -> None:
+    """Atomically write a Traefik route file as 0644 and nudge the watcher.
 
     gate-admin runs with UMask=0077 (secrets stay 0600), but Traefik must be
-    able to read every apps/*.yml — a single 0600 file makes the whole apps/
-    provider fail with \"permission denied\" and no new ACME certs are issued.
+    able to read every dynamic/*.yml — a single 0600 file in apps/ makes the
+    whole subdirectory provider fail with \"permission denied\", leaving the
+    previous (stale) config active until a top-level file is touched.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
+    ensure_dynamic_readable()
+    if backup and path.exists():
+        statusstore.backup_file(path)
+
+    # Validate YAML before publishing into the watched tree.
+    try:
+        yaml.safe_load(content)
+    except yaml.YAMLError as exc:
+        raise ValueError(f"Invalid YAML for {path.name}: {exc}") from exc
+
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(content, encoding="utf-8")
+    os.chmod(tmp, 0o644)
+    tmp.replace(path)
     os.chmod(path, 0o644)
+    bump_traefik_revision(reason=path.name)
 
 
 def _parse_service_doc(path: Path, source: str) -> Service | None:
@@ -511,6 +605,7 @@ def create_service(
     )
     svc = get_service(name)
     assert svc is not None
+    statusstore.record_saved(svc.name, upstream=svc.upstream, host=svc.host)
     return svc
 
 
@@ -560,6 +655,7 @@ def update_service(
         svc.path.unlink()
     out = get_service(target_name)
     assert out is not None
+    statusstore.record_saved(out.name, upstream=out.upstream, host=out.host)
     return out
 
 
@@ -588,6 +684,7 @@ def update_system_service(name: str, *, upstream: str | None = None) -> Service:
     )
     out = get_service(name)
     assert out is not None
+    statusstore.record_saved(out.name, upstream=out.upstream, host=out.host)
     return out
 
 
@@ -598,7 +695,9 @@ def delete_service(name: str) -> None:
     if svc.source == "system":
         raise ValueError("System services (e.g. pve) cannot be deleted from the GUI.")
     if svc.path and svc.path.exists():
+        statusstore.backup_file(svc.path)
         svc.path.unlink()
+        bump_traefik_revision(reason=f"delete:{name}")
 
 
 def _rewrite_host_in_file(path: Path, old_domain: str, new_domain: str) -> None:

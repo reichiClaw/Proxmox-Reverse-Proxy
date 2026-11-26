@@ -195,6 +195,42 @@ class TestServiceCrud:
         assert PVE_YML.exists()
 
 
+class TestStatusAndDiagnose:
+    def test_services_list_shows_status_pills(self, client):
+        do_setup(client)
+        token = get_csrf(client, "/services/new")
+        client.post(
+            "/services/new",
+            data={"name": "statusy", "upstream": "http://10.0.0.5:80", "csrf_token": token},
+        )
+        page = client.get("/services")
+        assert "Saved" in page.text
+        assert "Active" in page.text
+        assert "Checked" in page.text
+
+    def test_edit_shows_configured_vs_active(self, client):
+        do_setup(client)
+        token = get_csrf(client, "/services/new")
+        client.post(
+            "/services/new",
+            data={"name": "cmp", "upstream": "http://10.0.0.5:80", "csrf_token": token},
+        )
+        page = client.get("/services/cmp/edit")
+        assert "Konfiguriertes Ziel" in page.text
+        assert "http://10.0.0.5:80" in page.text
+        assert "Speichern und prüfen" in page.text or "Save" in page.text
+
+    def test_diagnose_page_and_download(self, client):
+        do_setup(client)
+        page = client.get("/diagnose")
+        assert page.status_code == 200
+        assert "Diagnose" in page.text
+        dl = client.get("/diagnose.txt")
+        assert dl.status_code == 200
+        assert "text/plain" in dl.headers.get("content-type", "")
+        assert "Gate diagnose report" in dl.text
+
+
 class TestSettingsPage:
     def test_settings_update_and_injection_rejected(self, client):
         do_setup(client)

@@ -22,6 +22,7 @@
       <nav class="nav">
         <a href="/services" class="{% if title and 'ervice' in title %}active{% endif %}">Services</a>
         <a href="/settings" class="{% if title == 'Settings' %}active{% endif %}">Settings</a>
+        <a href="/diagnose" class="{% if title == 'Diagnose' %}active{% endif %}">Diagnose</a>
       </nav>
       <form class="logout" method="post" action="/logout">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />

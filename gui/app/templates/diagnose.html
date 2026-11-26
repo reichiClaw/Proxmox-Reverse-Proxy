@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <h1>Diagnose</h1>
+    <p class="lede">Redacted snapshot of saved vs active config, last probes, and Traefik errors. Safe to share for support.</p>
+  </div>
+  <a class="btn primary" href="/diagnose.txt">Diagnose kopieren (Download)</a>
+</section>
+
+<pre class="diagnose-report">{{ report }}</pre>
+{% endblock %}

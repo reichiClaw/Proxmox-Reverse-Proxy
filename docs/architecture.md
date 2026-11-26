@@ -222,7 +222,7 @@ http:
     pve:
       loadBalancer:
         servers:
-          - url: "https://172.16.0.2:8006"
+          - url: "https://10.0.0.4:8006"
         serversTransport: pve-transport
         passHostHeader: true
 

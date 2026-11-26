@@ -1,0 +1,3 @@
+# Auto-updated by Gate admin — do not edit.
+# Forces Traefik file-provider reload after nested config publishes.
+http: {}
