@@ -35,6 +35,10 @@ from .store import (
     update_service,
 )
 from . import totp as totp_mod
+from . import publish as publish_mod
+from . import runtime as runtime_mod
+from . import statusstore
+from .diagnose import build_diagnose_report
 
 logger = logging.getLogger("gate")
 
@@ -358,10 +362,20 @@ async def logout(request: Request, csrf_token: Annotated[str, Form()] = ""):
 async def services_list(request: Request):
     if redir := _require_login(request):
         return redir
+    snap = runtime_mod.fetch_runtime()
+    statuses = statusstore.all_statuses()
+    rows = [publish_mod.service_view(s, statuses, snap) for s in list_services()]
     return TEMPLATES.TemplateResponse(
         request,
         "services.html",
-        _ctx(request, title="Services", services=list_services()),
+        _ctx(
+            request,
+            title="Services",
+            rows=rows,
+            runtime_ok=snap.ok,
+            runtime_error=snap.error,
+            provider_errors=snap.provider_errors[:8],
+        ),
     )
 
 
@@ -408,7 +422,13 @@ async def services_create(
         svc.upstream,
     )
     dns_note = _dns_ensure(svc.host)
-    _flash(request, f"Added {svc.public_url} — certificate will be issued automatically.{dns_note}")
+    result = publish_mod.verify_service(svc.name, run_probes=True)
+    kind = "ok" if result.ok else "error"
+    _flash(
+        request,
+        f"Added {svc.public_url}. {result.message}{dns_note}",
+        kind,
+    )
     return RedirectResponse("/services", status_code=303)
 
 
@@ -420,10 +440,20 @@ async def services_edit(name: str, request: Request):
     if svc is None:
         _flash(request, "Service not found.", "error")
         return RedirectResponse("/services", status_code=303)
+    snap = runtime_mod.fetch_runtime()
+    row = publish_mod.service_view(svc, statusstore.all_statuses(), snap)
     return TEMPLATES.TemplateResponse(
         request,
         "service_form.html",
-        _ctx(request, title=f"Edit {name}", mode="edit", service=svc),
+        _ctx(
+            request,
+            title=f"Edit {name}",
+            mode="edit",
+            service=svc,
+            row=row,
+            runtime_ok=snap.ok,
+            runtime_error=snap.error,
+        ),
     )
 
 
@@ -467,8 +497,79 @@ async def services_update(
         dns_note = _dns_ensure(svc.host)
         if old_host:
             dns_note += _dns_delete(old_host)
-    _flash(request, f"Updated {svc.public_url}.{dns_note}")
-    return RedirectResponse("/services", status_code=303)
+    result = publish_mod.verify_service(svc.name, run_probes=True)
+    kind = "ok" if result.ok else "error"
+    _flash(request, f"Updated {svc.public_url}. {result.message}{dns_note}", kind)
+    return RedirectResponse(f"/services/{svc.name}/edit", status_code=303)
+
+
+@app.post("/services/{name}/verify")
+async def services_verify(
+    name: str,
+    request: Request,
+    csrf_token: Annotated[str, Form()] = "",
+):
+    if redir := _require_login(request):
+        return redir
+    if not _check_csrf(request, csrf_token):
+        return _csrf_reject(request, "/services")
+    result = publish_mod.verify_service(name, run_probes=True)
+    kind = "ok" if result.ok else "error"
+    _flash(request, result.message, kind)
+    return RedirectResponse(f"/services/{name}/edit", status_code=303)
+
+
+@app.post("/services/{name}/probe")
+async def services_probe(
+    name: str,
+    request: Request,
+    csrf_token: Annotated[str, Form()] = "",
+):
+    if redir := _require_login(request):
+        return redir
+    if not _check_csrf(request, csrf_token):
+        return _csrf_reject(request, "/services")
+    result = publish_mod.verify_service(name, run_probes=True)
+    parts = [result.message]
+    if result.direct:
+        d = result.direct
+        parts.append(
+            f"Direct: ok={d.get('ok')} HTTP={d.get('http_status')} "
+            f"{d.get('duration_ms')}ms {d.get('error') or ''}".strip()
+        )
+    if result.via:
+        v = result.via
+        parts.append(
+            f"Via Traefik: ok={v.get('ok')} HTTP={v.get('http_status')} "
+            f"{v.get('duration_ms')}ms {v.get('error') or ''}".strip()
+        )
+    kind = "ok" if result.ok and (result.direct or {}).get("ok") else "error"
+    _flash(request, " | ".join(parts), kind)
+    return RedirectResponse(f"/services/{name}/edit", status_code=303)
+
+
+@app.get("/diagnose", response_class=HTMLResponse)
+async def diagnose_page(request: Request):
+    if redir := _require_login(request):
+        return redir
+    report = build_diagnose_report()
+    return TEMPLATES.TemplateResponse(
+        request,
+        "diagnose.html",
+        _ctx(request, title="Diagnose", report=report),
+    )
+
+
+@app.get("/diagnose.txt")
+async def diagnose_txt(request: Request):
+    if redir := _require_login(request):
+        return redir
+    report = build_diagnose_report()
+    return Response(
+        content=report,
+        media_type="text/plain; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="gate-diagnose.txt"'},
+    )
 
 
 @app.post("/services/{name}/delete")

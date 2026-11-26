@@ -7,11 +7,59 @@
       {% if mode == 'create' %}
       Creates a TLS route. Leave path empty for a whole subdomain, or set a path to share a host with another backend.
       {% else %}
-      Updates the Traefik drop-in for this route.
+      Save publishes Traefik YAML with correct permissions and waits for Traefik to show the new target as active.
       {% endif %}
     </p>
   </div>
 </section>
+
+{% if mode == 'edit' and row %}
+<section class="status-panel">
+  <h2 class="form-section">Übernahme-Status</h2>
+  <div class="status-pills">
+    <span class="pill {% if row.saved_at %}ok{% else %}unknown{% endif %}">Saved{% if row.saved_at %} · {{ row.saved_at }}{% endif %}</span>
+    <span class="pill {% if row.active_matched == true %}ok{% elif row.active_matched == false %}bad{% else %}unknown{% endif %}">Active{% if row.active_at %} · {{ row.active_at }}{% endif %}</span>
+    <span class="pill {% if row.last_direct and row.last_direct.ok %}ok{% elif row.checked_at %}bad{% else %}unknown{% endif %}">Checked{% if row.checked_at %} · {{ row.checked_at }}{% endif %}</span>
+  </div>
+  <dl class="kv">
+    <div><dt>Konfiguriertes Ziel</dt><dd><code>{{ service.upstream }}</code></dd></div>
+    <div><dt>Aktives Ziel (Traefik)</dt><dd><code>{{ row.active_upstream or 'unbekannt' }}</code></dd></div>
+    {% if row.active_matched == false %}
+    <div><dt>Status</dt><dd class="bad-text">Änderung noch nicht übernommen / weicht ab</dd></div>
+    {% elif row.active_matched == true %}
+    <div><dt>Status</dt><dd class="ok-text">Aktive Konfiguration entspricht der gespeicherten</dd></div>
+    {% else %}
+    <div><dt>Status</dt><dd>Traefik-Laufzeitstatus unbekannt{% if runtime_error %}: {{ runtime_error }}{% endif %}</dd></div>
+    {% endif %}
+  </dl>
+  {% if row.active_error or row.publish_error %}
+  <p class="status-mismatch">{{ row.active_error or row.publish_error }}</p>
+  {% endif %}
+  {% if row.last_direct or row.last_via %}
+  <details class="tech-details">
+    <summary>Letzte Prüfergebnisse</summary>
+    {% if row.last_direct %}
+    <p>Direct: ok={{ row.last_direct.ok }} HTTP={{ row.last_direct.http_status }} {{ row.last_direct.duration_ms }}ms
+      {% if row.last_direct.error %}— {{ row.last_direct.error }}{% endif %}</p>
+    {% endif %}
+    {% if row.last_via %}
+    <p>Via Traefik: ok={{ row.last_via.ok }} HTTP={{ row.last_via.http_status }} {{ row.last_via.duration_ms }}ms
+      {% if row.last_via.error %}— {{ row.last_via.error }}{% endif %}</p>
+    {% endif %}
+  </details>
+  {% endif %}
+  <div class="form-actions">
+    <form method="post" action="/services/{{ service.name }}/verify">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <button class="btn primary" type="submit">Speichern und prüfen (erneut)</button>
+    </form>
+    <form method="post" action="/services/{{ service.name }}/probe">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <button class="btn ghost" type="submit">Verbindung testen</button>
+    </form>
+  </div>
+</section>
+{% endif %}
 
 <form method="post" class="form-grid">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
@@ -65,11 +113,11 @@
   <label>
     <span>Upstream URL</span>
     <input name="upstream" type="url" placeholder="http://10.10.10.20:3000" value="{{ service.upstream if service else '' }}" required />
-    <small>Reachable from the Traefik LXC on the services network. May include a path (e.g. <code>http://10.2.0.6:8682/webhook</code>).</small>
+    <small>Reachable from the Traefik LXC. For Proxmox use <code>https://10.0.0.4:8006</code> (verified via pve-root-ca).</small>
   </label>
 
   <div class="form-actions">
-    <button class="btn primary" type="submit">{% if mode == 'create' %}Create route{% else %}Save changes{% endif %}</button>
+    <button class="btn primary" type="submit">{% if mode == 'create' %}Create &amp; verify{% else %}Save &amp; verify{% endif %}</button>
     <a class="btn ghost" href="/services">Cancel</a>
   </div>
 </form>
